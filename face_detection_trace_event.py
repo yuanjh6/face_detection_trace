@@ -4,7 +4,7 @@ import logging
 import threading
 from datetime import datetime
 from queue import Queue
-
+import pandas as pd
 import cv2
 import face_recognition
 import numpy as np
@@ -16,11 +16,25 @@ logger = logging.getLogger(__name__)
 logger.addHandler(handler)
 VIDEO_IMG = 'video_img'
 
+person_df = pd.read_csv('data/person.csv', index_col='id').reset_index()
+PERSON_IMG_DIR = 'data/person_img/'
+
+
+class Person(object):
+    encoding_func = face_recognition.face_encodings
+
+    def __init__(self, person_id, imgs):
+        self.person_id = person_id
+        self.imgs = imgs
+        face_frames = [cv2.imread(PERSON_IMG_DIR + img) for img in self.imgs]
+        encodings_list = [face_recognition.face_encodings(face_frame) for face_frame in face_frames]
+        self.encodings = [encodings[0] for encodings in encodings_list if encodings]
+
 
 class Track(object):
     __id = 0
 
-    def __init__(self, tracker, frame, box, encoding, history=5):
+    def __init__(self, tracker, frame, box, encoding, persons, history=5):
         self.__id = Track.__id = Track.__id + 1
         self.tracker = tracker
         self.img = frame[box[1]:box[1] + box[3], box[0]:box[0] + box[2]]
@@ -28,11 +42,17 @@ class Track(object):
         self.encoding = encoding
         self.__history = [False] * history
         self.__history_iter = itertools.cycle(range(history))
+        self.match_person_id = None
         # 暂不用self.__history_have=bool
-
-        self.tracker.init(frame, tuple(box))
         self.__history[next(self.__history_iter)] = True
-        Track.new_face_callback(self.__id, self.frame, box)
+
+        self.__init_tracker(frame, box)
+
+        self.find_person(persons)
+        Track.new_face_callback(self.__id, self.img, box, self.match_person_id)
+
+    def __init_tracker(self, frame, box):
+        self.tracker.init(frame, tuple(box))
 
     def update_img(self, frame, box, encoding):
         self.img = frame[box[1]:box[1] + box[3], box[0]:box[0] + box[2]]
@@ -40,11 +60,18 @@ class Track(object):
         self.frame = frame
         iter_num = next(self.__history_iter)
         if self.alive() and self.__history[iter_num] == 1 and sum(self.__history) == 1:
-            Track.lost_face_callback(self.id, self.frame, box)
+            Track.lost_face_callback(self.id, self.frame, box, self.match_person_id)
             self.__history[iter_num] = False
 
     def update(self, frame):
         return self.tracker.update(frame)
+
+    def find_person(self, persons, tolerance=0.6):
+        person_dist = [min(face_recognition.face_distance(person.encodings,self.encoding), default=1.0) for person in persons]
+
+        if min(person_dist) < tolerance:
+            min_dist_index = np.argmin(person_dist)
+            self.match_person_id = persons[min_dist_index].person_id
 
     def alive(self):
         return sum(self.__history) > 0
@@ -54,22 +81,24 @@ class Track(object):
         return self.__id
 
     @staticmethod
-    def new_face_callback(track_id, frame=None, box=None):
+    def new_face_callback(track_id, frame=None, box=None, person_id=None):
         DetectionTrack.draw_boxes(frame, box)
         cv2.imwrite('%s/new_face_%s.png' % (VIDEO_IMG, track_id), frame)
-        logger.info('new,%s,%s,%s,%s' % (
-            datetime.now().strftime('%Y%m%d%H%M%S'), track_id, '%s/new_face_%s.png' % (VIDEO_IMG, track_id), box))
+        logger.info('new,%s,%s,%s,%s,%s' % (
+            datetime.now().strftime('%Y%m%d%H%M%S'), track_id, '%s/new_face_%s.png' % (VIDEO_IMG, track_id), box,
+            person_id))
 
     @staticmethod
-    def lost_face_callback(track_id, frame=None, box=None):
+    def lost_face_callback(track_id, frame=None, box=None, person_id=None):
         DetectionTrack.draw_boxes(frame, box)
         cv2.imwrite('%s/lost_face_%s.png' % (VIDEO_IMG, track_id), frame)
-        logger.info('lost,%s,%s,%s,%s' % (
-            datetime.now().strftime('%Y%m%d%H%M%S'), track_id, '%s/lost_face_%s.png' % (VIDEO_IMG, track_id), box))
+        logger.info('lost,%s,%s,%s,%s,%s' % (
+            datetime.now().strftime('%Y%m%d%H%M%S'), track_id, '%s/lost_face_%s.png' % (VIDEO_IMG, track_id), box,
+            person_id))
 
 
 class DetectionTrack(object):
-    def __init__(self, face_detector, detecton_freq):
+    def __init__(self, face_detector, detecton_freq, persons):
         self.__last_frame = None
         self.detecton_freq_iter = itertools.cycle(range(detecton_freq))
         self.is_start = False
@@ -80,6 +109,7 @@ class DetectionTrack(object):
         self.face_detector = face_detector
         self.frame_queue = Queue(maxsize=100)
         self.ipc_path = None
+        self.persons = persons
 
     def start(self, ipc_path=None):
         self.ipc_path = ipc_path
@@ -170,11 +200,13 @@ class DetectionTrack(object):
         new_trackers = [
             tracks_map[box_track_id[0]].update_img(frame, boxes_img, boxes_img_encoding)
             if len(box_track_id) > 0
-            else Track(cv2.TrackerBoosting_create(), frame, boxes_img, boxes_img_encoding) for
+            else Track(cv2.TrackerBoosting_create(), frame, boxes_img, boxes_img_encoding, persons) for
             box_track_id, boxes_img, boxes_img_encoding in
             zip(box_track_ids, boxes, boxes_imgs_encoding)]
+        new_trackers = list(filter(lambda x: x is not None, new_trackers))
+
         self.tracks = list(filter(lambda x: x.alive(), self.tracks))  # keep alive tracks only
-        self.tracks.extend(list(filter(lambda x: x is not None, new_trackers)))
+        self.tracks.extend(new_trackers)
 
     def __face_track(self, frame):
         boxes = [list(map(int, track.update(frame)[1])) for track in self.tracks]
@@ -204,7 +236,8 @@ class DetectionTrack(object):
 if __name__ == '__main__':
     ipc_path = 'video/1.mp4'  # sys.argv[1]
     faceadd = "model/haarcascade_frontalface_default.xml"
+    persons = person_df.apply(lambda x: Person(x['id'], x['imgs'].split(' ')), axis=1)
     face_detector = cv2.CascadeClassifier(faceadd)
     # faces = face_detector.detectMultiScale(gray, 1.15, 5)
-    detection_track = DetectionTrack(face_detector, detecton_freq=20)
+    detection_track = DetectionTrack(face_detector, detecton_freq=20, persons=persons)
     detection_track.start(ipc_path)
