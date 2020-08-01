@@ -152,13 +152,17 @@ class DetectionTrack(object):
 
     def __face_dec(self, frame):
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        boxes_imgs = self.face_detector.detectMultiScale(gray, 1.15, 5)
+        boxes = self.face_detector.detectMultiScale(gray, 1.15, 5)
+        self.__face_upgrade_track(frame, boxes)
+        return boxes
+
+    def __face_upgrade_track(self, frame, boxes):
         tracks_map = {track.id: track for track in self.tracks}
         track_ids, track_encodings = list(map(lambda x: x.id, self.tracks)), list(
             map(lambda x: x.encoding, self.tracks))
         boxes_imgs_encoding = list()
-        if boxes_imgs is not None and list(boxes_imgs):
-            boxes_imgs_encoding = face_recognition.face_encodings(frame, known_face_locations=boxes_imgs)
+        if boxes is not None and list(boxes):
+            boxes_imgs_encoding = face_recognition.face_encodings(frame, known_face_locations=boxes)
         box_track_ids = [
             np.array(track_ids, int)[face_recognition.compare_faces(track_encodings, unknown_face_encoding)] for
             unknown_face_encoding in boxes_imgs_encoding]
@@ -168,10 +172,9 @@ class DetectionTrack(object):
             if len(box_track_id) > 0
             else Track(cv2.TrackerBoosting_create(), frame, boxes_img, boxes_img_encoding) for
             box_track_id, boxes_img, boxes_img_encoding in
-            zip(box_track_ids, boxes_imgs, boxes_imgs_encoding)]
+            zip(box_track_ids, boxes, boxes_imgs_encoding)]
         self.tracks = list(filter(lambda x: x.alive(), self.tracks))  # keep alive tracks only
         self.tracks.extend(list(filter(lambda x: x is not None, new_trackers)))
-        return boxes_imgs
 
     def __face_track(self, frame):
         boxes = [list(map(int, track.update(frame)[1])) for track in self.tracks]
