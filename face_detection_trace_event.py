@@ -1,12 +1,22 @@
+import copy
 import itertools
-import logging
 import threading
+from collections import deque
 from datetime import datetime
 from queue import Queue
 
 import cv2
 import face_recognition
 import numpy as np
+import logging
+
+import copy
+import itertools
+import threading
+import time
+from collections import deque
+from contextlib import suppress
+from queue import Queue
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 handler = logging.FileHandler("log.txt")
@@ -14,6 +24,130 @@ handler.setLevel(logging.INFO)
 logger = logging.getLogger(__name__)
 logger.addHandler(handler)
 VIDEO_IMG = 'video_img'
+
+
+class DetectionTrackQueue(object):
+    def __init__(self, min_hold_deteciton=1):
+        self.wait_is_detection = None
+        self.wait_boxes = None
+        self.min_hold_deteciton = min_hold_deteciton
+        self.hold_deteciton = 0
+        self.deque = deque()
+        self.track_queue = Queue(maxsize=20)
+        self.lock01 = threading.Lock()
+        self.is_end = False
+
+    # thread 01
+    # this modify left side of self.deque
+    def put_frame(self, frame):
+        # multi kaolv xia
+        with self.lock01:
+            self.deque.append((frame, [], []))  # frame,is_detection,boxes
+        is_blow_hold_deteciton = self.hold_deteciton < self.min_hold_deteciton
+        if is_blow_hold_deteciton:
+            return
+
+        left_frame, is_detection, left_boxes = self.deque.popleft()
+
+        is_min_hold_deteciton = self.hold_deteciton == self.min_hold_deteciton
+        is_detection_waiting = left_boxes is self.wait_boxes
+        # print('left frame:%s is_min_hold_deteciton:%s(%s,%s) is_detectioned:%s is_detection_waiting:%s' % (
+        #     left_frame, is_min_hold_deteciton, self.hold_deteciton, self.min_hold_deteciton, is_detectioned,
+        #     is_detection_waiting))
+        if is_min_hold_deteciton and (is_detection or is_detection_waiting):
+            self.deque.appendleft((left_frame, is_detection, left_boxes))
+        elif is_detection:
+            self.hold_deteciton -= 1
+            self.track_queue.put((left_frame, is_detection, left_boxes))
+        else:
+            self.track_queue.put((left_frame, is_detection, left_boxes))
+
+    # thread 02
+    # this modify right side of self.deque (low probability conflict with put_frame,so ignore)
+    def get_detection_frame(self):
+        # use defer like
+        right_frame = None
+        try:
+            with self.lock01:
+                right_frame, is_detection, right_boxes = self.deque.pop()
+                self.deque.append((right_frame, is_detection, right_boxes))
+        except:
+            return True, None
+
+        if right_frame is None:
+            return False, None
+
+        is_detection_waiting = self.wait_boxes is not None
+        if is_detection or is_detection_waiting:
+            return True, None
+
+        self.wait_is_detection, self.wait_boxes = is_detection, right_boxes
+        self.hold_deteciton += 1
+        return True, copy.deepcopy(right_frame)
+
+    # thread 02
+    # no use lock,make sure this never run with get_detection_frame at the same time(wait_boxes synchro)
+    def put_detection_boxes(self, boxes):
+        if self.wait_boxes is None:
+            raise Exception('no wait_boxes point')
+        self.wait_is_detection.append(True)
+        self.wait_boxes.extend(boxes)
+        self.wait_boxes = None
+        self.wait_is_detection = None
+
+    # thread 03
+    def get_tracker_frame(self):
+        return self.track_queue.get()
+
+    def end(self):
+        self.is_end = True
+        while len(self.deque):
+            self.track_queue.put(self.deque.popleft())
+
+
+#
+#
+# class TestDemo(object):
+#     def __init__(self):
+#         self.detection_queue = DetectionTrackQueue()
+#
+#     def start(self):
+#         put_thread = threading.Thread(target=self.__put_frame)
+#         detection_thread = threading.Thread(target=self.__get_decetion)
+#         track_thread = threading.Thread(target=self.__get_track)
+#
+#         put_thread.start()
+#         detection_thread.start()
+#         track_thread.start()
+#
+#     def __put_frame(self):
+#         itert = itertools.cycle(range(10000))
+#         while True:
+#             frame = next(itert)
+#             self.detection_queue.put_frame(frame)
+#             print('put frame:%s' % frame)
+#             time.sleep(0.05)
+#
+#     def __get_decetion(self):
+#         while True:
+#             frame = self.detection_queue.get_detection_frame()
+#             print('get detection frame:%s' % frame)
+#             if frame is None:
+#                 time.sleep(0.1)
+#                 continue
+#             time.sleep(0.50)
+#             self.detection_queue.put_detection_boxes([1.0, 2.0, 3.0, 4.0])
+#             print('put_detection_boxes frame:%s' % frame)
+#
+#     def __get_track(self):
+#         while True:
+#             frame, boxes = self.detection_queue.get_tracker()
+#             print('get track frame:%s %s' % (frame, boxes))
+#             time.sleep(0.01)
+#
+# #
+# # testDemo = TestDemo()
+# # testDemo.start()
 
 
 class Track(object):
@@ -77,7 +211,7 @@ class DetectionTrack(object):
         self.cap_thread = None
         self.det_thread = None
         self.face_detector = face_detector
-        self.frame_queue = Queue(maxsize=100)
+        self.dt_frame_queue = DetectionTrackQueue(min_hold_deteciton=1)
         self.ipc_path = None
 
     def start(self, ipc_path=None):
@@ -85,9 +219,11 @@ class DetectionTrack(object):
         if not self.is_start:
             self.is_start = True
             self.cap_thread = threading.Thread(target=self._start_capture, args=(ipc_path,))
-            self.det_thread = threading.Thread(target=self._start_detection_trace)
+            self.det_thread = threading.Thread(target=self._start_detection)
+            self.trk_thread = threading.Thread(target=self._start_trace)
             self.cap_thread.start()
             self.det_thread.start()
+            self.trk_thread.start()
 
     def _start_capture(self, ipc_path=None):
         cv_cap = cv2.VideoCapture(ipc_path)
@@ -97,80 +233,67 @@ class DetectionTrack(object):
                 if self.is_realtime:
                     self.__last_frame = frame
                 else:
-                    self.frame_queue.put(frame)
+                    self.dt_frame_queue.put_frame(frame)
             else:
                 if self.is_realtime:
                     self.is_start = False  # stop threading:_start_capture,_start_detection_trace
-                    break
                     # todo enhance,some tail frame wo't be run by threading _start_detection_trace
                 else:
-                    self.frame_queue.put(None)
-                    break
+                    self.dt_frame_queue.put_frame(None)
+                break
 
-    def _get_last_frame(self):
-        if self.is_realtime:
-            ret, self.__last_frame = self.__last_frame, None
-        else:
-            ret = self.frame_queue.get()
-        return ret
-
-    def _start_detection_trace(self):
-        videoCapture = cv2.VideoCapture(self.ipc_path)
-        fps = videoCapture.get(cv2.CAP_PROP_FPS)
-        size = (
-            int(videoCapture.get(cv2.CAP_PROP_FRAME_WIDTH)),
-            int(videoCapture.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        )
-        out_file_path = "%s_output.avi" % self.ipc_path
-        videoWriter = cv2.VideoWriter(
-            out_file_path,
-            cv2.VideoWriter_fourcc('M', 'P', '4', '2'),  # 编码器
-            fps,
-            size
-        )
-
+    def _start_detection(self):
         while self.is_start:
-            last_frame = self._get_last_frame()
+            ret, last_frame = self.dt_frame_queue.get_detection_frame()
+            if not ret:
+                self.dt_frame_queue.end()
+                break
             if last_frame is None:
-                if self.is_realtime:
-                    continue
-                else:
-                    break
-            if next(self.detecton_freq_iter) == 0:
-                boxes = self.__face_dec(last_frame)
+                continue
+
+            boxes = self.__face_dec(last_frame)
+            self.dt_frame_queue.put_detection_boxes(boxes)
+
+    def _start_trace(self):
+        while self.is_start:
+            frame, is_detection, boxes = self.dt_frame_queue.get_tracker_frame()
+            if (boxes is None) or (frame is None):
+                break
+            is_detection_result = bool(is_detection)
+            if not is_detection_result:
+                boxes = self.__face_track(frame)
             else:
-                boxes = self.__face_track(last_frame)
-            [DetectionTrack.draw_boxes(last_frame, list(box)) for box in boxes]
-            videoWriter.write(last_frame)
-            cv2.imshow('xx', last_frame)
+                tracks_map = {track.id: track for track in self.tracks}
+                track_ids, track_encodings = list(map(lambda x: x.id, self.tracks)), list(
+                    map(lambda x: x.encoding, self.tracks))
+                boxes_imgs_encoding = list()
+                if boxes is not None and list(boxes):
+                    boxes_imgs_encoding = face_recognition.face_encodings(frame, known_face_locations=boxes)
+                box_track_ids = [
+                    np.array(track_ids, int)[face_recognition.compare_faces(track_encodings, unknown_face_encoding)] for
+                    unknown_face_encoding in boxes_imgs_encoding]
+
+                new_trackers = [
+                    tracks_map[box_track_id[0]].update_img(frame, boxes_img, boxes_img_encoding)
+                    if len(box_track_id) > 0
+                    else Track(cv2.TrackerBoosting_create(), frame, boxes_img, boxes_img_encoding) for
+                    box_track_id, boxes_img, boxes_img_encoding in
+                    zip(box_track_ids, boxes, boxes_imgs_encoding)]
+                self.tracks = list(filter(lambda x: x.alive(), self.tracks))  # keep alive tracks only
+                self.tracks.extend(list(filter(lambda x: x is not None, new_trackers)))
+
+            [DetectionTrack.draw_boxes(frame, list(box)) for box in boxes]
+
+            cv2.imshow('xx', frame)
             cv2.waitKey(1)
-        videoWriter.release()
 
     def stop(self):
         self.is_start = False
 
     def __face_dec(self, frame):
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        boxes_imgs = self.face_detector.detectMultiScale(gray, 1.15, 5)
-        tracks_map = {track.id: track for track in self.tracks}
-        track_ids, track_encodings = list(map(lambda x: x.id, self.tracks)), list(
-            map(lambda x: x.encoding, self.tracks))
-        boxes_imgs_encoding = list()
-        if boxes_imgs is not None and list(boxes_imgs):
-            boxes_imgs_encoding = face_recognition.face_encodings(frame, known_face_locations=boxes_imgs)
-        box_track_ids = [
-            np.array(track_ids, int)[face_recognition.compare_faces(track_encodings, unknown_face_encoding)] for
-            unknown_face_encoding in boxes_imgs_encoding]
-
-        new_trackers = [
-            tracks_map[box_track_id[0]].update_img(frame, boxes_img, boxes_img_encoding)
-            if len(box_track_id) > 0
-            else Track(cv2.TrackerBoosting_create(), frame, boxes_img, boxes_img_encoding) for
-            box_track_id, boxes_img, boxes_img_encoding in
-            zip(box_track_ids, boxes_imgs, boxes_imgs_encoding)]
-        self.tracks = list(filter(lambda x: x.alive(), self.tracks))  # keep alive tracks only
-        self.tracks.extend(list(filter(lambda x: x is not None, new_trackers)))
-        return boxes_imgs
+        boxes = self.face_detector.detectMultiScale(gray, 1.15, 5)
+        return boxes
 
     def __face_track(self, frame):
         boxes = [list(map(int, track.update(frame)[1])) for track in self.tracks]
