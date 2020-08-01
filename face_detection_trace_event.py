@@ -3,6 +3,7 @@ import itertools
 import logging
 import threading
 from datetime import datetime
+from functools import partial
 from queue import Queue
 import pandas as pd
 import cv2
@@ -29,6 +30,7 @@ class Person(object):
         face_frames = [cv2.imread(PERSON_IMG_DIR + img) for img in self.imgs]
         encodings_list = [face_recognition.face_encodings(face_frame) for face_frame in face_frames]
         self.encodings = [encodings[0] for encodings in encodings_list if encodings]
+        print('persion %s %s'%(str([np.sum(encoding) for encoding in self.encodings]),self.encodings[0][:10]))
 
 
 class Track(object):
@@ -67,8 +69,9 @@ class Track(object):
         return self.tracker.update(frame)
 
     def find_person(self, persons, tolerance=0.6):
-        person_dist = [min(face_recognition.face_distance(person.encodings,self.encoding), default=1.0) for person in persons]
-
+        person_dist = [min(face_recognition.face_distance(person.encodings, self.encoding), default=1.0) for person in
+                       persons]
+        print('find_person self.encodings %s %s' % (str(np.sum(self.encoding)),str(self.encoding[:10])))
         if min(person_dist) < tolerance:
             min_dist_index = np.argmin(person_dist)
             self.match_person_id = persons[min_dist_index].person_id
@@ -181,8 +184,7 @@ class DetectionTrack(object):
         self.is_start = False
 
     def __face_dec(self, frame):
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        boxes = self.face_detector.detectMultiScale(gray, 1.15, 5)
+        boxes = self.face_detector.detectMultiScale(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), 1.15, 5)
         self.__face_upgrade_track(frame, boxes)
         return boxes
 
@@ -193,6 +195,7 @@ class DetectionTrack(object):
         boxes_imgs_encoding = list()
         if boxes is not None and list(boxes):
             boxes_imgs_encoding = face_recognition.face_encodings(frame, known_face_locations=boxes)
+            [cv2.imwrite(str(np.sum(boxes_encoding))+'.png',frame[box[1]:box[1] + box[3], box[0]:box[0] + box[2]]) for boxes_encoding,box in zip(boxes_imgs_encoding,boxes)]
         box_track_ids = [
             np.array(track_ids, int)[face_recognition.compare_faces(track_encodings, unknown_face_encoding)] for
             unknown_face_encoding in boxes_imgs_encoding]
@@ -238,6 +241,5 @@ if __name__ == '__main__':
     faceadd = "model/haarcascade_frontalface_default.xml"
     persons = person_df.apply(lambda x: Person(x['id'], x['imgs'].split(' ')), axis=1)
     face_detector = cv2.CascadeClassifier(faceadd)
-    # faces = face_detector.detectMultiScale(gray, 1.15, 5)
     detection_track = DetectionTrack(face_detector, detecton_freq=20, persons=persons)
     detection_track.start(ipc_path)
