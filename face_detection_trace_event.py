@@ -57,14 +57,14 @@ class Track(object):
     def new_face_callback(track_id, frame=None, box=None):
         DetectionTrack.draw_boxes(frame, box)
         cv2.imwrite('%s/new_face_%s.png' % (VIDEO_IMG, track_id), frame)
-        logger.info('new face datetime:%s track_id: %s img:%s box:%s' % (
+        logger.info('new,%s,%s,%s,%s' % (
             datetime.now().strftime('%Y%m%d%H%M%S'), track_id, '%s/new_face_%s.png' % (VIDEO_IMG, track_id), box))
 
     @staticmethod
     def lost_face_callback(track_id, frame=None, box=None):
         DetectionTrack.draw_boxes(frame, box)
         cv2.imwrite('%s/lost_face_%s.png' % (VIDEO_IMG, track_id), frame)
-        logger.info('lost face datetime:%s track_id: %s img:%s box:%s' % (
+        logger.info('lost,%s,%s,%s,%s' % (
             datetime.now().strftime('%Y%m%d%H%M%S'), track_id, '%s/lost_face_%s.png' % (VIDEO_IMG, track_id), box))
 
 
