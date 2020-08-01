@@ -30,7 +30,7 @@ class Person(object):
         face_frames = [cv2.imread(PERSON_IMG_DIR + img) for img in self.imgs]
         encodings_list = [face_recognition.face_encodings(face_frame) for face_frame in face_frames]
         self.encodings = [encodings[0] for encodings in encodings_list if encodings]
-        print('persion %s %s'%(str([np.sum(encoding) for encoding in self.encodings]),self.encodings[0][:10]))
+        print('new persion %s' % (str([np.sum(encoding) for encoding in self.encodings])))
 
 
 class Track(object):
@@ -39,7 +39,7 @@ class Track(object):
     def __init__(self, tracker, frame, box, encoding, persons, history=5):
         self.__id = Track.__id = Track.__id + 1
         self.tracker = tracker
-        self.img = frame[box[1]:box[1] + box[3], box[0]:box[0] + box[2]]
+        self.img = frame[(box[1]):(box[1] + box[3]), (box[0]):(box[0] + box[2])]
         self.frame = frame
         self.encoding = encoding
         self.__history = [False] * history
@@ -71,7 +71,7 @@ class Track(object):
     def find_person(self, persons, tolerance=0.6):
         person_dist = [min(face_recognition.face_distance(person.encodings, self.encoding), default=1.0) for person in
                        persons]
-        print('find_person self.encodings %s %s' % (str(np.sum(self.encoding)),str(self.encoding[:10])))
+        print('find_person self.encodings %s ' % (str(np.sum(self.encoding))))
         if min(person_dist) < tolerance:
             min_dist_index = np.argmin(person_dist)
             self.match_person_id = persons[min_dist_index].person_id
@@ -195,7 +195,14 @@ class DetectionTrack(object):
         boxes_imgs_encoding = list()
         if boxes is not None and list(boxes):
             boxes_imgs_encoding = face_recognition.face_encodings(frame, known_face_locations=boxes)
-            [cv2.imwrite(str(np.sum(boxes_encoding))+'.png',frame[box[1]:box[1] + box[3], box[0]:box[0] + box[2]]) for boxes_encoding,box in zip(boxes_imgs_encoding,boxes)]
+            # print('###', np.array(boxes_imgs_encoding).shape)
+            # boxes_imgs_encodings = [
+            #     face_recognition.face_encodings(frame[(box[1]):(box[1] + box[3]), (box[0]):(box[0] + box[2])]) for box in boxes]
+            # boxes_imgs_encoding = [boxes_imgs_encoding[0] for boxes_imgs_encoding in boxes_imgs_encodings if
+            #                        boxes_imgs_encoding[:1]]
+            # print('####', np.array(boxes_imgs_encoding).shape)
+            # [cv2.imwrite(str(np.sum(boxes_encoding)) + '.png', frame[box[1]:box[1] + box[3], box[0]:box[0] + box[2]])
+            #  for boxes_encoding, box in zip(boxes_imgs_encoding, boxes)]
         box_track_ids = [
             np.array(track_ids, int)[face_recognition.compare_faces(track_encodings, unknown_face_encoding)] for
             unknown_face_encoding in boxes_imgs_encoding]
