@@ -210,7 +210,7 @@ class DetectionTrack(object):
         new_trackers = [
             tracks_map[box_track_id[0]].update_img(frame, boxes_img, boxes_img_encoding)
             if len(box_track_id) > 0
-            else Track(cv2.TrackerBoosting_create(), frame, boxes_img, boxes_img_encoding, persons) for
+            else Track(cv2.TrackerKCF_create(), frame, boxes_img, boxes_img_encoding, persons) for
             box_track_id, boxes_img, boxes_img_encoding in
             zip(box_track_ids, boxes, boxes_imgs_encoding)]
         new_trackers = list(filter(lambda x: x is not None, new_trackers))
