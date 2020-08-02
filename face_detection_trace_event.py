@@ -22,6 +22,35 @@ person_df = pd.read_csv('data/person.csv', index_col='id').reset_index()
 PERSON_IMG_DIR = 'data/person_img/'
 
 
+class Util(object):
+    @staticmethod
+    def fl_to_cv_box(rect):  # 获得人脸矩形的坐标信息
+        top, right, bottom, left = rect
+        x = left
+        y = top
+        w = right - left
+        h = bottom - top
+        return x, y, w, h
+
+    @staticmethod
+    def cv_to_fl_box(rect):  # 获得人脸矩形的坐标信息
+        x, y, w, h = rect
+        left = x
+        top = y
+        right = w + left
+        bottom = h + top
+        return top, right, bottom, left
+
+    @staticmethod
+    def draw_boxes(frame, box):
+        x, y, w, h = box
+        cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+
+    @staticmethod
+    def cut_frame_box(frame, box):
+        return frame[box[1]:box[1] + box[3], box[0]:box[0] + box[2]]
+
+
 class Person(object):
     encoding_func = face_recognition.face_encodings
 
@@ -90,7 +119,7 @@ class Track(object):
 
     @staticmethod
     def new_face_callback(ipc_name, track_id, frame=None, box=None, person_id=None):
-        DetectionTrack.draw_boxes(frame, box)
+        Util.draw_boxes(frame, box)
         cv2.imwrite('%s/new_face_%s.png' % (VIDEO_IMG, track_id), frame)
         logger.info('%s,new,%s,%s,%s,%s,%s' % (ipc_name,
                                                datetime.now().strftime('%Y%m%d%H%M%S'), track_id,
@@ -99,7 +128,7 @@ class Track(object):
 
     @staticmethod
     def lost_face_callback(ipc_name, track_id, frame=None, box=None, person_id=None):
-        DetectionTrack.draw_boxes(frame, box)
+        Util.draw_boxes(frame, box)
         cv2.imwrite('%s/lost_face_%s.png' % (VIDEO_IMG, track_id), frame)
         logger.info('%s,lost,%s,%s,%s,%s,%s' % (ipc_name,
                                                 datetime.now().strftime('%Y%m%d%H%M%S'), track_id,
@@ -216,7 +245,7 @@ class DetectionTrack(object):
                     boxes = self.__face_dec(last_frame, ipc_name)
                 else:
                     boxes = self.__face_track(last_frame, ipc_name)
-                [DetectionTrack.draw_boxes(last_frame, list(box)) for box in boxes]
+                [Util.draw_boxes(last_frame, list(box)) for box in boxes]
                 self.video_write_map[ipc_name].write(last_frame)
                 # cv2.imshow('xx', last_frame)
                 # cv2.waitKey(1)
@@ -227,13 +256,9 @@ class DetectionTrack(object):
             self.stop_one(ipc_info['name'])
 
     def __face_dec(self, frame, ipc_name):
-        boxes = self.face_detector(frame)
+        boxes = self.face_detector.detection(frame)
         self.__face_upgrade_track(frame, boxes, ipc_name)
         return boxes
-
-    @staticmethod
-    def cut_frame_box(frame, box):
-        return frame[box[1]:box[1] + box[3], box[0]:box[0] + box[2]]
 
     def __face_upgrade_track(self, frame, boxes, ipc_name):
         tracks_map = {track.id: track for track in self.tracks_map[ipc_name]}
@@ -241,7 +266,7 @@ class DetectionTrack(object):
             map(lambda x: x.encoding, self.tracks_map[ipc_name]))
         boxes_imgs_encoding = list()
         if boxes is not None and len(boxes):
-            boxes_imgs_encoding = [self.face_encoding.encoding(DetectionTrack.cut_frame_box(frame, box)) for box in
+            boxes_imgs_encoding = [self.face_encoding.encoding(Util.cut_frame_box(frame, box)) for box in
                                    boxes]
             boxes_encoding_filter = [boxes_img_encoding is not None and len(boxes_img_encoding) > 0 for
                                      boxes_img_encoding in boxes_imgs_encoding]
@@ -253,7 +278,7 @@ class DetectionTrack(object):
             # boxes_imgs_encoding = [boxes_imgs_encoding[0] for boxes_imgs_encoding in boxes_imgs_encodings if
             #                        boxes_imgs_encoding[:1]]
             # print('####', np.array(boxes_imgs_encoding).shape)
-            [cv2.imwrite(str(np.sum(boxes_encoding)) + '.png', DetectionTrack.cut_frame_box(frame, box))
+            [cv2.imwrite(str(np.sum(boxes_encoding)) + '.png', Util.cut_frame_box(frame, box))
              for boxes_encoding, box in zip(boxes_imgs_encoding, boxes)]
 
         box_track_ids = [
@@ -276,11 +301,6 @@ class DetectionTrack(object):
         boxes = [list(map(int, track.update(frame)[1])) for track in self.tracks_map[ipc_name]]
         return boxes
 
-    @staticmethod
-    def draw_boxes(frame, box):
-        x, y, w, h = box
-        cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-
     # todo 01 use diff change to decation detection ,02,use yield change param
     # ref Human-detection-and-Tracking
     @staticmethod
@@ -297,10 +317,10 @@ class DetectionTrack(object):
         return temp
 
 
-class FaceEncoding_FR_FE(object):
+class FaceEncodingFrFe(object):
     @staticmethod
     def trans_boxes(cv_boxes):
-        fl_boxes = [FaceFactory.cv_to_fl_box(box) for box in cv_boxes]
+        fl_boxes = [Util.cv_to_fl_box(box) for box in cv_boxes]
         return fl_boxes
 
     @staticmethod
@@ -309,40 +329,35 @@ class FaceEncoding_FR_FE(object):
         return np.array(face_encodings[0]) if face_encodings else None
 
 
+class FaceDetectionFrFl(object):
+    @staticmethod
+    def detection(frame):
+        boxes = face_recognition.face_locations(frame)
+        boxes = [Util.fl_to_cv_box(box) for box in boxes]
+        return boxes
+
+
+class FaceDetectionCvCas(object):
+    def __init__(self, face_add):
+        self.face_detector = cv2.CascadeClassifier(face_add)
+
+    def detection(self, frame):
+        boxes = self.face_detector.detectMultiScale(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), 1.15, 5)
+        return boxes
+
+
 class FaceFactory(object):
     @staticmethod
-    def fl_to_cv_box(rect):  # 获得人脸矩形的坐标信息
-        top, right, bottom, left = rect
-        x = left
-        y = top
-        w = right - left
-        h = bottom - top
-        return x, y, w, h
-
-    @staticmethod
-    def cv_to_fl_box(rect):  # 获得人脸矩形的坐标信息
-        x, y, w, h = rect
-        left = x
-        top = y
-        right = w + left
-        bottom = h + top
-        return top, right, bottom, left
+    def get_encoding(name):
+        if name == 'FR_FE':
+            return FaceEncodingFrFe()
 
     @staticmethod
     def get_detection(name):
         if name == "FR_FL":
-            return FaceFactory.face_recognition_face_locations
-
-    @staticmethod
-    def face_recognition_face_locations(frame):
-        boxes = face_recognition.face_locations(frame)
-        boxes = [FaceFactory.fl_to_cv_box(box) for box in boxes]
-        return boxes
-
-    @staticmethod
-    def get_encoding(name):
-        if name == 'FR_FE':
-            return FaceEncoding_FR_FE()
+            return FaceDetectionFrFl()
+        elif name == "CV_CAS":
+            return FaceDetectionCvCas(face_add="model/haarcascade_frontalface_default.xml")
 
 
 if __name__ == '__main__':
@@ -350,6 +365,6 @@ if __name__ == '__main__':
     face_encoding = FaceFactory.get_encoding("FR_FE")
     persons = person_df.apply(lambda x: Person(face_encoding, x['id'], x['imgs'].split(' ')), axis=1)
     persons_map = {'test1': persons, 'test11': persons}
-    face_detector = FaceFactory.get_detection('FR_FL')
+    face_detector = FaceFactory.get_detection('CV_CAS')
     detection_track = DetectionTrack(face_detector, face_encoding, detecton_freq=20, persons_map=persons_map)
     detection_track.start_all(ipc_infos)
