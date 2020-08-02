@@ -1,3 +1,6 @@
+import os
+from collections import defaultdict
+
 import dlib
 import itertools
 import logging
@@ -15,9 +18,54 @@ handler.setLevel(logging.INFO)
 logger = logging.getLogger(__name__)
 logger.addHandler(handler)
 VIDEO_IMG = 'video_img'
-
-person_df = pd.read_csv('data/person.csv', index_col='id').reset_index()
 PERSON_IMG_DIR = 'data/person_img/'
+
+
+class Util(object):
+    @staticmethod
+    def fl_to_cv_box(rect):  # 获得人脸矩形的坐标信息
+        top, right, bottom, left = rect
+        x = left
+        y = top
+        w = right - left
+        h = bottom - top
+        return x, y, w, h
+
+    @staticmethod
+    def cv_to_fl_box(rect):  # 获得人脸矩形的坐标信息
+        x, y, w, h = rect
+        left = x
+        top = y
+        right = w + left
+        bottom = h + top
+        return top, right, bottom, left
+
+    @staticmethod
+    def draw_boxes(frame, box):
+        x, y, w, h = box
+        cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+
+    @staticmethod
+    def cut_frame_box(frame, box):
+        return frame[box[1]:box[1] + box[3], box[0]:box[0] + box[2]]
+
+    @staticmethod
+    def get_dirs_files(dir):
+        name_files_map = defaultdict(list)
+        assert os.path.exists(dir) and os.path.isdir(dir), 'dir is illegal'
+        # for sub_dir in os.listdir(dir):
+        #     if os.path.isdir(dir):
+        #         for file_path in os.listdir(dir + sub_dir + '/'):
+        #             if os.path.isfile(dir + sub_dir + '/' + file_path):
+        #                 name_files_map[sub_dir].append(file_path)
+
+        [name_files_map[sub_dir].append(dir + sub_dir + '/' + file_path) for sub_dir in os.listdir(dir) if
+         os.path.isdir(dir) for file_path
+         in os.listdir(dir + sub_dir + '/') if os.path.isfile(dir + sub_dir + '/' + file_path)]
+        return name_files_map
+
+
+persons_files = Util.get_dirs_files(PERSON_IMG_DIR)
 
 
 class FaceDetectionFrFoc(object):
@@ -118,43 +166,15 @@ class FaceFactory(object):
             return None
 
 
-class Util(object):
-    @staticmethod
-    def fl_to_cv_box(rect):  # 获得人脸矩形的坐标信息
-        top, right, bottom, left = rect
-        x = left
-        y = top
-        w = right - left
-        h = bottom - top
-        return x, y, w, h
-
-    @staticmethod
-    def cv_to_fl_box(rect):  # 获得人脸矩形的坐标信息
-        x, y, w, h = rect
-        left = x
-        top = y
-        right = w + left
-        bottom = h + top
-        return top, right, bottom, left
-
-    @staticmethod
-    def draw_boxes(frame, box):
-        x, y, w, h = box
-        cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-
-    @staticmethod
-    def cut_frame_box(frame, box):
-        return frame[box[1]:box[1] + box[3], box[0]:box[0] + box[2]]
-
-
 class Person(object):
-    encoding_func = face_recognition.face_encodings
+    __id = 0
 
-    def __init__(self, face_encoding, person_id, imgs):
+    def __init__(self, face_encoding, person_name, imgs):
         self.face_encoding = face_encoding
-        self.person_id = person_id
+        self.person_name = person_name
         self.imgs = imgs
-        face_frames = [cv2.imread(PERSON_IMG_DIR + img) for img in self.imgs]
+        assert np.all([os.path.exists(img) for img in self.imgs]), 'img file is error'
+        face_frames = [cv2.imread(img) for img in self.imgs]
         encodings = [self.face_encoding.encoding_face(face_frame) for face_frame in face_frames]
         self.encodings = list(filter(lambda x: x is not None and len(x) > 0, encodings))
         logger.info('new persion %s' % (str([np.sum(encoding) for encoding in self.encodings])))
@@ -172,7 +192,7 @@ class Track(object):
         self.encoding = encoding
         self.__history = [False] * history
         self.__history_iter = itertools.cycle(range(history))
-        self.match_person_id = None
+        self.match_person_name = None
         # 暂不用self.__history_have=bool
         self.__history[next(self.__history_iter)] = True
 
@@ -180,7 +200,7 @@ class Track(object):
 
         self.find_person(persons)
         self.event_call_back = event_call_back
-        self.event_call_back(0, self.ipc_name, self.__id, self.img, box, self.match_person_id)
+        self.event_call_back(0, self.ipc_name, self.__id, self.img, box, self.match_person_name)
 
     def __init_tracker(self, frame, box):
         self.tracker.init(frame, tuple(box))
@@ -191,7 +211,7 @@ class Track(object):
         self.frame = frame
         iter_num = next(self.__history_iter)
         if self.alive() and self.__history[iter_num] == 1 and sum(self.__history) == 1:
-            self.event_call_back(1, self.ipc_name, self.id, self.frame, box, self.match_person_id)
+            self.event_call_back(1, self.ipc_name, self.id, self.frame, box, self.match_person_name)
             self.__history[iter_num] = False
 
     def update(self, frame):
@@ -205,7 +225,7 @@ class Track(object):
         logger.info('find_person self.encodings %s ' % (str(np.sum(self.encoding))))
         if min(person_dist) < tolerance:
             min_dist_index = np.argmin(person_dist)
-            self.match_person_id = persons[min_dist_index].person_id
+            self.match_person_name = persons[min_dist_index].person_name
 
     def alive(self):
         return sum(self.__history) > 0
@@ -233,15 +253,15 @@ class DetectionTrack(object):
         self.ipc_infos = None
         self.persons_map = persons_map
         self.event_df = pd.DataFrame(
-            columns=['ipc_name', 'event_name', 'datetime', 'track_id', 'img_file', 'box', 'person_id'])
+            columns=['ipc_name', 'event_name', 'datetime', 'track_id', 'img_file', 'box', 'person_name'])
 
-    def event_call_back(self, type, ipc_name, track_id, frame=None, box=None, person_id=None):
+    def event_call_back(self, type, ipc_name, track_id, frame=None, box=None, person_name=None):
         # type=0 enter, 1 out
         cv2.imwrite('%s/new_face_%s.png' % (VIDEO_IMG, track_id), frame)
         self.event_df.loc[self.event_df.shape[0]] = [ipc_name, type,
                                                      datetime.now().strftime('%Y%m%d%H%M%S'), track_id,
                                                      '%s/new_face_%s.png' % (VIDEO_IMG, track_id), box,
-                                                     person_id]
+                                                     person_name]
 
     def start_all(self, ipc_infos):
         # ipc_infos:list.map.key=ipc_url/ipc_name,list.map.value='xx/xx.mp4'/test01
@@ -410,7 +430,8 @@ class DetectionTrack(object):
 if __name__ == '__main__':
     ipc_infos = [{'name': 'test1', 'path': 'video/1.mp4'}]
     face_encoding = FaceFactory.get_encoding("DLIB_REG")
-    persons = person_df.apply(lambda x: Person(face_encoding, x['id'], x['imgs'].split(' ')), axis=1)
+    # persons = person_df.apply(lambda x: Person(face_encoding, x['imgs'].split(' ')), axis=1)
+    persons = [Person(face_encoding, name, files) for name, files in persons_files.items()]
     persons_map = {'test1': persons, 'test11': persons}
     face_detector = FaceFactory.get_detection('DLIB_FRO')
     detection_track = DetectionTrack(face_detector, face_encoding, detecton_freq=20, persons_map=persons_map)
