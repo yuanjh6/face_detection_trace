@@ -1,10 +1,8 @@
-import copy
+import dlib
 import itertools
 import logging
 import threading
-from collections import defaultdict
 from datetime import datetime
-from functools import partial
 from queue import Queue
 import pandas as pd
 import cv2
@@ -20,6 +18,104 @@ VIDEO_IMG = 'video_img'
 
 person_df = pd.read_csv('data/person.csv', index_col='id').reset_index()
 PERSON_IMG_DIR = 'data/person_img/'
+
+
+class FaceDetectionFrFoc(object):
+    @staticmethod
+    def detection(frame):
+        boxes = face_recognition.face_locations(frame)
+        boxes = [Util.fl_to_cv_box(box) for box in boxes]
+        return boxes
+
+
+class FaceDetectionDlibFro(object):
+    def __init__(self):
+        self.face_detector = dlib.get_frontal_face_detector()
+
+    @staticmethod
+    def dlib_box_to_cv(rectangle):
+        x, y, w, h = rectangle.left(), rectangle.top(), rectangle.right() - rectangle.left(), rectangle.bottom() - rectangle.top()
+        return x, y, w, h
+
+    def detection(self, frame):
+        rectangles = self.face_detector(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), 1)
+        if not rectangles:
+            return list()
+        else:
+            return [FaceDetectionDlibFro.dlib_box_to_cv(rectangle) for rectangle in rectangles]
+        return boxes
+
+
+class FaceDetectionCvCas(object):
+    def __init__(self, face_add):
+        self.face_detector = cv2.CascadeClassifier(face_add)
+
+    def detection(self, frame):
+        boxes = self.face_detector.detectMultiScale(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), 1.15, 5)
+        return boxes
+
+
+class FaceEncodingFrFe(object):
+    @staticmethod
+    def encoding(frame, box):
+        fl_box = Util.cv_to_fl_box(box)
+        face_encodings = face_recognition.face_encodings(frame, [fl_box])
+        return np.array(face_encodings[0]) if face_encodings else None
+
+    @staticmethod
+    def encoding_face(face_frame):
+        face_encodings = face_recognition.face_encodings(face_frame)
+        return np.array(face_encodings[0]) if face_encodings else None
+
+
+class FaceEncodingDlibReg(object):
+    def __init__(self):
+        self.face_detector = dlib.get_frontal_face_detector()
+        self.shape = dlib.shape_predictor("model/shape_predictor_68_face_landmarks.dat")
+        self.face_encoding = dlib.face_recognition_model_v1("model/dlib_face_recognition_resnet_model_v1.dat")
+
+    @staticmethod
+    def cv_box_to_dlib(box):
+        x, y, w, h = box
+        rectangle = dlib.rectangle(x, y, x + w, y + h)
+        return rectangle
+
+    def encoding(self, frame, box):
+        rectangle = FaceEncodingDlibReg.cv_box_to_dlib(box)
+        shape = self.shape(frame, rectangle)
+        face_descriptor = self.face_encoding.compute_face_descriptor(frame, shape)
+        return np.array(face_descriptor)
+
+    def encoding_face(self, face_frame):
+        boxes = self.face_detector(face_frame, 1)
+        if not boxes:
+            return None
+        box = boxes[0]
+        shape = self.shape(face_frame, box)
+        face_descriptor = self.face_encoding.compute_face_descriptor(face_frame, shape)
+        return np.array(face_descriptor)
+
+
+class FaceFactory(object):
+    @staticmethod
+    def get_encoding(name):
+        if name == 'FR_FE':
+            return FaceEncodingFrFe()
+        elif name == 'DLIB_REG':
+            return FaceEncodingDlibReg()
+        else:
+            return None
+
+    @staticmethod
+    def get_detection(name):
+        if name == "FR_FL":
+            return FaceDetectionFrFoc()
+        elif name == "CV_CAS":
+            return FaceDetectionCvCas(face_add="model/haarcascade_frontalface_default.xml")
+        elif name == "DLIB_FRO":
+            return FaceDetectionDlibFro()
+        else:
+            return None
 
 
 class Util(object):
@@ -59,7 +155,7 @@ class Person(object):
         self.person_id = person_id
         self.imgs = imgs
         face_frames = [cv2.imread(PERSON_IMG_DIR + img) for img in self.imgs]
-        encodings = [self.face_encoding.encoding(face_frame) for face_frame in face_frames]
+        encodings = [self.face_encoding.encoding_face(face_frame) for face_frame in face_frames]
         self.encodings = list(filter(lambda x: x is not None and len(x) > 0, encodings))
         print('new persion %s' % (str([np.sum(encoding) for encoding in self.encodings])))
 
@@ -266,8 +362,7 @@ class DetectionTrack(object):
             map(lambda x: x.encoding, self.tracks_map[ipc_name]))
         boxes_imgs_encoding = list()
         if boxes is not None and len(boxes):
-            boxes_imgs_encoding = [self.face_encoding.encoding(Util.cut_frame_box(frame, box)) for box in
-                                   boxes]
+            boxes_imgs_encoding = [self.face_encoding.encoding(frame, box) for box in boxes]
             boxes_encoding_filter = [boxes_img_encoding is not None and len(boxes_img_encoding) > 0 for
                                      boxes_img_encoding in boxes_imgs_encoding]
             boxes = np.array(boxes)[boxes_encoding_filter]
@@ -317,54 +412,11 @@ class DetectionTrack(object):
         return temp
 
 
-class FaceEncodingFrFe(object):
-    @staticmethod
-    def trans_boxes(cv_boxes):
-        fl_boxes = [Util.cv_to_fl_box(box) for box in cv_boxes]
-        return fl_boxes
-
-    @staticmethod
-    def encoding(face_frame):
-        face_encodings = face_recognition.face_encodings(face_frame)
-        return np.array(face_encodings[0]) if face_encodings else None
-
-
-class FaceDetectionFrFl(object):
-    @staticmethod
-    def detection(frame):
-        boxes = face_recognition.face_locations(frame)
-        boxes = [Util.fl_to_cv_box(box) for box in boxes]
-        return boxes
-
-
-class FaceDetectionCvCas(object):
-    def __init__(self, face_add):
-        self.face_detector = cv2.CascadeClassifier(face_add)
-
-    def detection(self, frame):
-        boxes = self.face_detector.detectMultiScale(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), 1.15, 5)
-        return boxes
-
-
-class FaceFactory(object):
-    @staticmethod
-    def get_encoding(name):
-        if name == 'FR_FE':
-            return FaceEncodingFrFe()
-
-    @staticmethod
-    def get_detection(name):
-        if name == "FR_FL":
-            return FaceDetectionFrFl()
-        elif name == "CV_CAS":
-            return FaceDetectionCvCas(face_add="model/haarcascade_frontalface_default.xml")
-
-
 if __name__ == '__main__':
     ipc_infos = [{'name': 'test1', 'path': 'video/1.mp4'}]
-    face_encoding = FaceFactory.get_encoding("FR_FE")
+    face_encoding = FaceFactory.get_encoding("DLIB_REG")
     persons = person_df.apply(lambda x: Person(face_encoding, x['id'], x['imgs'].split(' ')), axis=1)
     persons_map = {'test1': persons, 'test11': persons}
-    face_detector = FaceFactory.get_detection('CV_CAS')
+    face_detector = FaceFactory.get_detection('DLIB_FRO')
     detection_track = DetectionTrack(face_detector, face_encoding, detecton_freq=20, persons_map=persons_map)
     detection_track.start_all(ipc_infos)
