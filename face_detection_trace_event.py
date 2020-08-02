@@ -25,12 +25,13 @@ PERSON_IMG_DIR = 'data/person_img/'
 class Person(object):
     encoding_func = face_recognition.face_encodings
 
-    def __init__(self, person_id, imgs):
+    def __init__(self, face_encoding, person_id, imgs):
+        self.face_encoding = face_encoding
         self.person_id = person_id
         self.imgs = imgs
         face_frames = [cv2.imread(PERSON_IMG_DIR + img) for img in self.imgs]
-        encodings_list = [face_recognition.face_encodings(face_frame) for face_frame in face_frames]
-        self.encodings = [encodings[0] for encodings in encodings_list if encodings]
+        encodings = [self.face_encoding.encoding(face_frame) for face_frame in face_frames]
+        self.encodings = list(filter(lambda x: x is not None and len(x) > 0, encodings))
         print('new persion %s' % (str([np.sum(encoding) for encoding in self.encodings])))
 
 
@@ -71,6 +72,8 @@ class Track(object):
         return self.tracker.update(frame)
 
     def find_person(self, persons, tolerance=0.6):
+        if self.encoding is None or len(self.encoding) == 0:
+            return
         person_dist = [min(face_recognition.face_distance(person.encodings, self.encoding), default=1.0) for person in
                        persons]
         print('find_person self.encodings %s ' % (str(np.sum(self.encoding))))
@@ -105,7 +108,7 @@ class Track(object):
 
 
 class DetectionTrack(object):
-    def __init__(self, face_detector, detecton_freq, persons_map):
+    def __init__(self, face_detector, face_encoding, detecton_freq, persons_map):
         self.__last_frame = None
         self.detecton_freq = detecton_freq
         self.detecton_freq_iter_map = dict()
@@ -115,6 +118,7 @@ class DetectionTrack(object):
         self.cap_thread_map = dict()
         self.det_thread = None
         self.face_detector = face_detector
+        self.face_encoding = face_encoding
         self.frame_queue_map = dict()
         self.cv_map = dict()
         self.video_write_map = dict()
@@ -223,40 +227,49 @@ class DetectionTrack(object):
             self.stop_one(ipc_info['name'])
 
     def __face_dec(self, frame, ipc_name):
-        boxes = self.face_detector.detectMultiScale(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), 1.15, 5)
+        boxes = self.face_detector(frame)
         self.__face_upgrade_track(frame, boxes, ipc_name)
         return boxes
+
+    @staticmethod
+    def cut_frame_box(frame, box):
+        return frame[box[1]:box[1] + box[3], box[0]:box[0] + box[2]]
 
     def __face_upgrade_track(self, frame, boxes, ipc_name):
         tracks_map = {track.id: track for track in self.tracks_map[ipc_name]}
         track_ids, track_encodings = list(map(lambda x: x.id, self.tracks_map[ipc_name])), list(
             map(lambda x: x.encoding, self.tracks_map[ipc_name]))
         boxes_imgs_encoding = list()
-        if boxes is not None and list(boxes):
-            boxes_imgs_encoding = face_recognition.face_encodings(frame, known_face_locations=boxes)
+        if boxes is not None and len(boxes):
+            boxes_imgs_encoding = [self.face_encoding.encoding(DetectionTrack.cut_frame_box(frame, box)) for box in
+                                   boxes]
+            boxes_encoding_filter = [boxes_img_encoding is not None and len(boxes_img_encoding) > 0 for
+                                     boxes_img_encoding in boxes_imgs_encoding]
+            boxes = np.array(boxes)[boxes_encoding_filter]
+            boxes_imgs_encoding = np.array(boxes_imgs_encoding)[boxes_encoding_filter]
             # print('###', np.array(boxes_imgs_encoding).shape)
             # boxes_imgs_encodings = [
             #     face_recognition.face_encodings(frame[(box[1]):(box[1] + box[3]), (box[0]):(box[0] + box[2])]) for box in boxes]
             # boxes_imgs_encoding = [boxes_imgs_encoding[0] for boxes_imgs_encoding in boxes_imgs_encodings if
             #                        boxes_imgs_encoding[:1]]
             # print('####', np.array(boxes_imgs_encoding).shape)
-            # [cv2.imwrite(str(np.sum(boxes_encoding)) + '.png', frame[box[1]:box[1] + box[3], box[0]:box[0] + box[2]])
-            #  for boxes_encoding, box in zip(boxes_imgs_encoding, boxes)]
+            [cv2.imwrite(str(np.sum(boxes_encoding)) + '.png', DetectionTrack.cut_frame_box(frame, box))
+             for boxes_encoding, box in zip(boxes_imgs_encoding, boxes)]
+
         box_track_ids = [
             np.array(track_ids, int)[face_recognition.compare_faces(track_encodings, unknown_face_encoding)] for
             unknown_face_encoding in boxes_imgs_encoding]
 
-        new_trackers = [
-            tracks_map[box_track_id[0]].update_img(frame, boxes_img, boxes_img_encoding)
-            if len(box_track_id) > 0
-            else Track(ipc_name, cv2.TrackerKCF_create(), frame, boxes_img, boxes_img_encoding,
-                       self.persons_map[ipc_name]) for
-            box_track_id, boxes_img, boxes_img_encoding in
-            zip(box_track_ids, boxes, boxes_imgs_encoding)]
-        new_trackers = list(filter(lambda x: x is not None, new_trackers))
+        new_trackers = []
+        for box_track_id, boxes_img, boxes_img_encoding in zip(box_track_ids, boxes, boxes_imgs_encoding):
+            if len(box_track_id) > 0:
+                tracks_map[box_track_id[0]].update_img(frame, boxes_img, boxes_img_encoding)
+            else:
+                new_trackers.append(Track(ipc_name, cv2.TrackerKCF_create(), frame, boxes_img, boxes_img_encoding,
+                                          self.persons_map[ipc_name]))
 
-        self.tracks_map[ipc_name] = list(
-            filter(lambda x: x.alive(), self.tracks_map[ipc_name]))  # keep alive tracks only
+        # keep alive tracks only
+        self.tracks_map[ipc_name] = [tracker for tracker in self.tracks_map[ipc_name] if tracker.alive()]
         self.tracks_map[ipc_name].extend(new_trackers)
 
     def __face_track(self, frame, ipc_name):
@@ -284,11 +297,59 @@ class DetectionTrack(object):
         return temp
 
 
+class FaceEncoding_FR_FE(object):
+    @staticmethod
+    def trans_boxes(cv_boxes):
+        fl_boxes = [FaceFactory.cv_to_fl_box(box) for box in cv_boxes]
+        return fl_boxes
+
+    @staticmethod
+    def encoding(face_frame):
+        face_encodings = face_recognition.face_encodings(face_frame)
+        return np.array(face_encodings[0]) if face_encodings else None
+
+
+class FaceFactory(object):
+    @staticmethod
+    def fl_to_cv_box(rect):  # 获得人脸矩形的坐标信息
+        top, right, bottom, left = rect
+        x = left
+        y = top
+        w = right - left
+        h = bottom - top
+        return x, y, w, h
+
+    @staticmethod
+    def cv_to_fl_box(rect):  # 获得人脸矩形的坐标信息
+        x, y, w, h = rect
+        left = x
+        top = y
+        right = w + left
+        bottom = h + top
+        return top, right, bottom, left
+
+    @staticmethod
+    def get_detection(name):
+        if name == "FR_FL":
+            return FaceFactory.face_recognition_face_locations
+
+    @staticmethod
+    def face_recognition_face_locations(frame):
+        boxes = face_recognition.face_locations(frame)
+        boxes = [FaceFactory.fl_to_cv_box(box) for box in boxes]
+        return boxes
+
+    @staticmethod
+    def get_encoding(name):
+        if name == 'FR_FE':
+            return FaceEncoding_FR_FE()
+
+
 if __name__ == '__main__':
-    ipc_infos = [{'name': 'test1', 'path': 'video/1.mp4'}, {'name': 'test11', 'path': 'video/11.mp4'}]
-    faceadd = "model/haarcascade_frontalface_default.xml"
-    persons = person_df.apply(lambda x: Person(x['id'], x['imgs'].split(' ')), axis=1)
+    ipc_infos = [{'name': 'test1', 'path': 'video/1.mp4'}]
+    face_encoding = FaceFactory.get_encoding("FR_FE")
+    persons = person_df.apply(lambda x: Person(face_encoding, x['id'], x['imgs'].split(' ')), axis=1)
     persons_map = {'test1': persons, 'test11': persons}
-    face_detector = cv2.CascadeClassifier(faceadd)
-    detection_track = DetectionTrack(face_detector, detecton_freq=20, persons_map=persons_map)
+    face_detector = FaceFactory.get_detection('FR_FL')
+    detection_track = DetectionTrack(face_detector, face_encoding, detecton_freq=20, persons_map=persons_map)
     detection_track.start_all(ipc_infos)
