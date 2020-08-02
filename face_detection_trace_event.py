@@ -157,13 +157,13 @@ class Person(object):
         face_frames = [cv2.imread(PERSON_IMG_DIR + img) for img in self.imgs]
         encodings = [self.face_encoding.encoding_face(face_frame) for face_frame in face_frames]
         self.encodings = list(filter(lambda x: x is not None and len(x) > 0, encodings))
-        print('new persion %s' % (str([np.sum(encoding) for encoding in self.encodings])))
+        logger.info('new persion %s' % (str([np.sum(encoding) for encoding in self.encodings])))
 
 
 class Track(object):
     __id = 0
 
-    def __init__(self, ipc_name, tracker, frame, box, encoding, persons, history=5):
+    def __init__(self, ipc_name, tracker, frame, box, encoding, persons, event_call_back, history=5):
         self.ipc_name = ipc_name
         self.__id = Track.__id = Track.__id + 1
         self.tracker = tracker
@@ -179,7 +179,8 @@ class Track(object):
         self.__init_tracker(frame, box)
 
         self.find_person(persons)
-        Track.new_face_callback(self.ipc_name, self.__id, self.img, box, self.match_person_id)
+        self.event_call_back = event_call_back
+        self.event_call_back(0, self.ipc_name, self.__id, self.img, box, self.match_person_id)
 
     def __init_tracker(self, frame, box):
         self.tracker.init(frame, tuple(box))
@@ -190,7 +191,7 @@ class Track(object):
         self.frame = frame
         iter_num = next(self.__history_iter)
         if self.alive() and self.__history[iter_num] == 1 and sum(self.__history) == 1:
-            Track.lost_face_callback(self.ipc_name, self.id, self.frame, box, self.match_person_id)
+            self.event_call_back(1, self.ipc_name, self.id, self.frame, box, self.match_person_id)
             self.__history[iter_num] = False
 
     def update(self, frame):
@@ -201,7 +202,7 @@ class Track(object):
             return
         person_dist = [min(face_recognition.face_distance(person.encodings, self.encoding), default=1.0) for person in
                        persons]
-        print('find_person self.encodings %s ' % (str(np.sum(self.encoding))))
+        logger.info('find_person self.encodings %s ' % (str(np.sum(self.encoding))))
         if min(person_dist) < tolerance:
             min_dist_index = np.argmin(person_dist)
             self.match_person_id = persons[min_dist_index].person_id
@@ -212,24 +213,6 @@ class Track(object):
     @property
     def id(self):
         return self.__id
-
-    @staticmethod
-    def new_face_callback(ipc_name, track_id, frame=None, box=None, person_id=None):
-        Util.draw_boxes(frame, box)
-        cv2.imwrite('%s/new_face_%s.png' % (VIDEO_IMG, track_id), frame)
-        logger.info('%s,new,%s,%s,%s,%s,%s' % (ipc_name,
-                                               datetime.now().strftime('%Y%m%d%H%M%S'), track_id,
-                                               '%s/new_face_%s.png' % (VIDEO_IMG, track_id), box,
-                                               person_id))
-
-    @staticmethod
-    def lost_face_callback(ipc_name, track_id, frame=None, box=None, person_id=None):
-        Util.draw_boxes(frame, box)
-        cv2.imwrite('%s/lost_face_%s.png' % (VIDEO_IMG, track_id), frame)
-        logger.info('%s,lost,%s,%s,%s,%s,%s' % (ipc_name,
-                                                datetime.now().strftime('%Y%m%d%H%M%S'), track_id,
-                                                '%s/lost_face_%s.png' % (VIDEO_IMG, track_id), box,
-                                                person_id))
 
 
 class DetectionTrack(object):
@@ -249,6 +232,16 @@ class DetectionTrack(object):
         self.video_write_map = dict()
         self.ipc_infos = None
         self.persons_map = persons_map
+        self.event_df = pd.DataFrame(
+            columns=['ipc_name', 'event_name', 'datetime', 'track_id', 'img_file', 'box', 'person_id'])
+
+    def event_call_back(self, type, ipc_name, track_id, frame=None, box=None, person_id=None):
+        # type=0 enter, 1 out
+        cv2.imwrite('%s/new_face_%s.png' % (VIDEO_IMG, track_id), frame)
+        self.event_df.loc[self.event_df.shape[0]] = [ipc_name, type,
+                                                     datetime.now().strftime('%Y%m%d%H%M%S'), track_id,
+                                                     '%s/new_face_%s.png' % (VIDEO_IMG, track_id), box,
+                                                     person_id]
 
     def start_all(self, ipc_infos):
         # ipc_infos:list.map.key=ipc_url/ipc_name,list.map.value='xx/xx.mp4'/test01
@@ -345,11 +338,13 @@ class DetectionTrack(object):
                 self.video_write_map[ipc_name].write(last_frame)
                 # cv2.imshow('xx', last_frame)
                 # cv2.waitKey(1)
-        # videoWriter.release()
+        self.after_all_stop()
 
-    def stop_all(self):
-        for ipc_info in self.ipc_infos:
-            self.stop_one(ipc_info['name'])
+    def after_all_stop(self):
+        self.event_df['img_file'] = self.event_df['img_file'].apply(lambda x: "<img src='%s'>" % x)
+        event_name_map = {0: '进', 1: '出'}
+        self.event_df['event_name'] = self.event_df['event_name'].map(event_name_map)
+        self.event_df.to_html('event.html')
 
     def __face_dec(self, frame, ipc_name):
         boxes = self.face_detector.detection(frame)
@@ -367,12 +362,12 @@ class DetectionTrack(object):
                                      boxes_img_encoding in boxes_imgs_encoding]
             boxes = np.array(boxes)[boxes_encoding_filter]
             boxes_imgs_encoding = np.array(boxes_imgs_encoding)[boxes_encoding_filter]
-            # print('###', np.array(boxes_imgs_encoding).shape)
+            # logger.info('###', np.array(boxes_imgs_encoding).shape)
             # boxes_imgs_encodings = [
             #     face_recognition.face_encodings(frame[(box[1]):(box[1] + box[3]), (box[0]):(box[0] + box[2])]) for box in boxes]
             # boxes_imgs_encoding = [boxes_imgs_encoding[0] for boxes_imgs_encoding in boxes_imgs_encodings if
             #                        boxes_imgs_encoding[:1]]
-            # print('####', np.array(boxes_imgs_encoding).shape)
+            # logger.info('####', np.array(boxes_imgs_encoding).shape)
             [cv2.imwrite(str(np.sum(boxes_encoding)) + '.png', Util.cut_frame_box(frame, box))
              for boxes_encoding, box in zip(boxes_imgs_encoding, boxes)]
 
@@ -386,7 +381,7 @@ class DetectionTrack(object):
                 tracks_map[box_track_id[0]].update_img(frame, boxes_img, boxes_img_encoding)
             else:
                 new_trackers.append(Track(ipc_name, cv2.TrackerKCF_create(), frame, boxes_img, boxes_img_encoding,
-                                          self.persons_map[ipc_name]))
+                                          self.persons_map[ipc_name], event_call_back=self.event_call_back))
 
         # keep alive tracks only
         self.tracks_map[ipc_name] = [tracker for tracker in self.tracks_map[ipc_name] if tracker.alive()]
