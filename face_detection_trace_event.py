@@ -167,17 +167,38 @@ class FaceFactory(object):
 
 
 class Person(object):
-    __id = 0
+    __unknow_id = 0
 
-    def __init__(self, face_encoding, person_name, imgs):
+    def __init__(self, face_encoding, person_name, imgs, is_new=False, new_imgs_max=10):
+        self.is_new = is_new
         self.face_encoding = face_encoding
         self.person_name = person_name
         self.imgs = imgs
         assert np.all([os.path.exists(img) for img in self.imgs]), 'img file is error'
+        # assert np.all([img.find('unknow') == -1 for img in self.imgs]), "img file can't contain unknow"
         face_frames = [cv2.imread(img) for img in self.imgs]
         encodings = [self.face_encoding.encoding_face(face_frame) for face_frame in face_frames]
         self.encodings = list(filter(lambda x: x is not None and len(x) > 0, encodings))
+        self.new_imgs = [None] * new_imgs_max
+        self.new_imgs_iter = itertools.cycle(range(new_imgs_max))
         logger.info('new persion %s' % (str([np.sum(encoding) for encoding in self.encodings])))
+
+    def new_img(self, img):
+        self.new_imgs[next(self.new_imgs_iter)] = img
+
+    @staticmethod
+    def new_unknow_person():
+        Person.__unknow_id += 1
+        person_name = 'unknow%s' % Person.__unknow_id
+        return Person(None, person_name, list(), is_new=True)
+
+    @staticmethod
+    def save_and_ret(face_encoding, img_base, person_name, img_items):
+        pass
+
+
+# img_items,[(file_name,img_frame)]
+# todo
 
 
 class Track(object):
@@ -192,7 +213,7 @@ class Track(object):
         self.encoding = encoding
         self.__history = [False] * history
         self.__history_iter = itertools.cycle(range(history))
-        self.match_person_name = None
+        self.match_person = None
         # 暂不用self.__history_have=bool
         self.__history[next(self.__history_iter)] = True
 
@@ -207,6 +228,7 @@ class Track(object):
 
     def update_img(self, frame, box, encoding):
         self.img = frame[box[1]:box[1] + box[3], box[0]:box[0] + box[2]]
+        self.match_person.new_img(self.img)
         self.encoding = encoding
         self.frame = frame
         iter_num = next(self.__history_iter)
@@ -225,7 +247,9 @@ class Track(object):
         logger.info('find_person self.encodings %s ' % (str(np.sum(self.encoding))))
         if min(person_dist) < tolerance:
             min_dist_index = np.argmin(person_dist)
-            self.match_person_name = persons[min_dist_index].person_name
+            self.match_person = persons[min_dist_index]
+        else:
+            self.match_person = Person.new_unknow_person()
 
     def alive(self):
         return sum(self.__history) > 0
