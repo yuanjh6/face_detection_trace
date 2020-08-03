@@ -167,34 +167,52 @@ class FaceFactory(object):
 
 
 class Person(object):
-    __unknow_id = 0
+    __unknow_max_id = 0
+    face_encoding = None
+    img_dir = ''
 
-    def __init__(self, face_encoding, person_name, imgs, is_new=False, new_imgs_max=10):
+    def __init__(self, person_name, imgs, is_new=False, new_face_frame_max=10):
         self.is_new = is_new
-        self.face_encoding = face_encoding
         self.person_name = person_name
-        self.imgs = imgs
-        assert np.all([os.path.exists(img) for img in self.imgs]), 'img file is error'
+        assert np.all([os.path.exists(img) for img in imgs]), 'img file is error'
         # assert np.all([img.find('unknow') == -1 for img in self.imgs]), "img file can't contain unknow"
-        face_frames = [cv2.imread(img) for img in self.imgs]
-        encodings = [self.face_encoding.encoding_face(face_frame) for face_frame in face_frames]
-        self.encodings = list(filter(lambda x: x is not None and len(x) > 0, encodings))
-        self.new_imgs = [None] * new_imgs_max
-        self.new_imgs_iter = itertools.cycle(range(new_imgs_max))
-        logger.info('new persion %s' % (str([np.sum(encoding) for encoding in self.encodings])))
+        face_frames = [cv2.imread(img) for img in imgs]
+        encodings = [Person.face_encoding.encoding_face(face_frame) for face_frame in face_frames]
+        self.__encodings = encodings
+
+        if is_new:
+            self.face_frames = [None] * new_face_frame_max
+            self.face_frame_count = 0
+            self.__encodings = [None] * new_face_frame_max
+
+        logger.info('new persion %s' % (str([np.sum(encoding) for encoding in self.encodings_valid()])))
 
     def new_img(self, img):
-        self.new_imgs[next(self.new_imgs_iter)] = img
+        if self.is_new:
+            self.face_frames[self.face_frame_count] = img
+            self.__encodings[self.face_frame_count] = Person.face_encoding.encoding_face(img)
+            self.face_frame_count = (self.face_frame_count + 1) % len(self.face_frames)
+
+    def encodings_valid(self):
+        return [x for x in self.__encodings if x is not None and len(x)]
 
     @staticmethod
     def new_unknow_person():
-        Person.__unknow_id += 1
-        person_name = 'unknow%s' % Person.__unknow_id
-        return Person(None, person_name, list(), is_new=True)
+        return Person(Person.get_unknow_name(), list(), is_new=True)
 
     @staticmethod
-    def save_and_ret(face_encoding, img_base, person_name, img_items):
-        pass
+    def get_unknow_name():
+        Person.__unknow_max_id += 1
+        return "unknow%s{0:03d}".format(Person.__unknow_max_id)
+
+    def save(self):
+        if self.is_new:
+            for index, face_frame in enumerate(self.face_frames):
+                cv2.imwrite(Person.img_dir + "{}/{0:02d}".format(self.person_name, index))
+            self.is_new = False
+
+    def __del__(self):
+        self.save()
 
 
 # img_items,[(file_name,img_frame)]
@@ -221,7 +239,7 @@ class Track(object):
 
         self.find_person(persons)
         self.event_call_back = event_call_back
-        self.event_call_back(0, self.ipc_name, self.__id, self.img, box, self.match_person_name)
+        self.event_call_back(0, self.ipc_name, self.__id, self.img, box, self.match_person.person_name)
 
     def __init_tracker(self, frame, box):
         self.tracker.init(frame, tuple(box))
@@ -233,7 +251,7 @@ class Track(object):
         self.frame = frame
         iter_num = next(self.__history_iter)
         if self.alive() and self.__history[iter_num] == 1 and sum(self.__history) == 1:
-            self.event_call_back(1, self.ipc_name, self.id, self.frame, box, self.match_person_name)
+            self.event_call_back(1, self.ipc_name, self.id, self.frame, box, self.match_person.person_name)
             self.__history[iter_num] = False
 
     def update(self, frame):
@@ -242,7 +260,8 @@ class Track(object):
     def find_person(self, persons, tolerance=0.6):
         if self.encoding is None or len(self.encoding) == 0:
             return
-        person_dist = [min(face_recognition.face_distance(person.encodings, self.encoding), default=1.0) for person in
+        person_dist = [min(face_recognition.face_distance(person.encodings_valid(), self.encoding), default=1.0) for
+                       person in
                        persons]
         logger.info('find_person self.encodings %s ' % (str(np.sum(self.encoding))))
         if min(person_dist) < tolerance:
@@ -289,7 +308,6 @@ class DetectionTrack(object):
 
     def start_all(self, ipc_infos):
         # ipc_infos:list.map.key=ipc_url/ipc_name,list.map.value='xx/xx.mp4'/test01
-
         self.ipc_infos = ipc_infos
         for ipc_info in ipc_infos:
             self.is_start_map[ipc_info['name']] = True
@@ -455,8 +473,10 @@ if __name__ == '__main__':
     ipc_infos = [{'name': 'test1', 'path': 'video/1.mp4'}]
     face_encoding = FaceFactory.get_encoding("DLIB_REG")
     # persons = person_df.apply(lambda x: Person(face_encoding, x['imgs'].split(' ')), axis=1)
-    persons = [Person(face_encoding, name, files) for name, files in persons_files.items()]
+    Person.face_encoding = face_encoding
+    Person.img_dir = PERSON_IMG_DIR
+    persons = [Person(name, files) for name, files in persons_files.items()]
     persons_map = {'test1': persons, 'test11': persons}
-    face_detector = FaceFactory.get_detection('DLIB_FRO')
+    face_detector = FaceFactory.get_detection('CV_CAS')
     detection_track = DetectionTrack(face_detector, face_encoding, detecton_freq=20, persons_map=persons_map)
     detection_track.start_all(ipc_infos)
