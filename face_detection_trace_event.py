@@ -312,7 +312,7 @@ class DetectionTrack(object):
         for ipc_info in ipc_infos:
             self.is_start_map[ipc_info['name']] = True
             self.start_one(ipc_info['name'], ipc_info['path'])
-        self.det_thread = threading.Thread(target=self._start_detection_trace)
+        self.det_thread = threading.Thread(target=self.__start_detection_trace)
         self.det_thread.start()
 
     def start_one(self, ipc_name, ipc_path):
@@ -336,7 +336,7 @@ class DetectionTrack(object):
         )
 
         self.video_write_map[ipc_name] = videoWriter
-        cap_thread = threading.Thread(target=self._start_capture, args=(ipc_name,))
+        cap_thread = threading.Thread(target=self.__start_capture, args=(ipc_name,))
         self.cap_thread_map[ipc_name] = cap_thread
         cap_thread.start()
 
@@ -353,7 +353,7 @@ class DetectionTrack(object):
         self.cv_map[ipc_name].release()
         del self.cv_map[ipc_name]
 
-    def _start_capture(self, ipc_name):
+    def __start_capture(self, ipc_name):
         cv_cap = self.cv_map[ipc_name]
         frame_queue = self.frame_queue_map.get(ipc_name)
         while self.is_start_map[ipc_name]:
@@ -372,7 +372,7 @@ class DetectionTrack(object):
                     frame_queue.put(None)
                     break
 
-    def _get_last_frame(self, ipc_name):
+    def __get_last_frame(self, ipc_name):
         # if self.is_realtime:
         #     pass
         # else:
@@ -380,12 +380,12 @@ class DetectionTrack(object):
         ret = self.frame_queue_map[ipc_name].get()
         return ret
 
-    def _start_detection_trace(self):
+    def __start_detection_trace(self):
         ipc_name_iter = itertools.cycle([ipc_info['name'] for ipc_info in self.ipc_infos])
         while np.any(list(self.is_start_map.values())):
             ipc_name = next(ipc_name_iter)
             while self.is_start_map[ipc_name]:
-                last_frame = self._get_last_frame(ipc_name)
+                last_frame = self.__get_last_frame(ipc_name)
                 if last_frame is None:
                     if self.is_realtime:
                         continue
