@@ -64,6 +64,12 @@ class Util(object):
          in os.listdir(dir + sub_dir + '/') if os.path.isfile(dir + sub_dir + '/' + file_path)]
         return name_files_map
 
+    @staticmethod
+    def get_file_path_split(filename):
+        (filepath, tempfilename) = os.path.split(filename);
+        (shotname, extension) = os.path.splitext(tempfilename);
+        return filepath, shotname, extension
+
 
 persons_files = Util.get_dirs_files(PERSON_IMG_DIR)
 
@@ -105,14 +111,21 @@ class FaceDetectionCvCas(object):
 
 class FaceEncodingFrFe(object):
     @staticmethod
+    def encoding_frame_box(frame_box):
+        if frame_box.frame is not None and len(frame_box.frame) > 0 and frame_box.box is not None and len(
+                frame_box.box) > 0:
+            return FaceEncodingFrFe.encoding(frame_box.frame, frame_box.box)
+        return FaceEncodingFrFe.encoding_img(frame_box.img)
+
+    @staticmethod
     def encoding(frame, box):
         fl_box = Util.cv_to_fl_box(box)
         face_encodings = face_recognition.face_encodings(frame, [fl_box])
         return np.array(face_encodings[0]) if face_encodings else None
 
     @staticmethod
-    def encoding_face(face_frame):
-        face_encodings = face_recognition.face_encodings(face_frame)
+    def encoding_img(img):
+        face_encodings = face_recognition.face_encodings(img)
         return np.array(face_encodings[0]) if face_encodings else None
 
 
@@ -128,19 +141,25 @@ class FaceEncodingDlibReg(object):
         rectangle = dlib.rectangle(x, y, x + w, y + h)
         return rectangle
 
+    def encoding_frame_box(self, frame_box):
+        if frame_box.frame is not None and len(frame_box.frame) > 0 and frame_box.box is not None and len(
+                frame_box.box) > 0:
+            return self.encoding(frame_box.frame, frame_box.box)
+        return self.encoding_img(frame_box.img)
+
     def encoding(self, frame, box):
         rectangle = FaceEncodingDlibReg.cv_box_to_dlib(box)
         shape = self.shape(frame, rectangle)
         face_descriptor = self.face_encoding.compute_face_descriptor(frame, shape)
         return np.array(face_descriptor)
 
-    def encoding_face(self, face_frame):
-        boxes = self.face_detector(face_frame, 1)
+    def encoding_img(self, img):
+        boxes = self.face_detector(img, 1)
         if not boxes:
             return None
         box = boxes[0]
-        shape = self.shape(face_frame, box)
-        face_descriptor = self.face_encoding.compute_face_descriptor(face_frame, shape)
+        shape = self.shape(img, box)
+        face_descriptor = self.face_encoding.compute_face_descriptor(img, shape)
         return np.array(face_descriptor)
 
 
@@ -167,15 +186,21 @@ class FaceFactory(object):
 
 
 class FrameBox(object):
-    def __init__(self, frame=None, box=None, img=None):
-        assert (img is not None) or (frame is not None and box is not None), 'bad param'
+    def __init__(self, frame=None, box=None):
+        assert (frame is not None and box is not None), 'bad param'
         self.frame = frame
-        self.box = box
-        self.img = img
+        self.box = list(map(int,box))
 
     @property
-    def img_name(self):
-        return ''  # todo
+    def name(self):
+        return '_'.join(map(str, self.box)) + '.png'
+
+    @staticmethod
+    def parse_file(file_name):
+        frame = cv2.imread(file_name)
+        file_path, file_name, file_ext = Util.get_file_path_split(file_name)
+        box = file_name.split('_')
+        return frame, box
 
 
 class LimitList(object):
@@ -204,24 +229,25 @@ class Person(object):
     face_encoding = None
     img_dir = ''
 
-    def __init__(self, person_name, imgs, is_new=False, new_face_frame_max=10):
+    def __init__(self, person_name, img_files, is_new=False, new_face_frame_max=10):
         self.is_new = is_new
         self.person_name = person_name
-        assert np.all([os.path.exists(img) for img in imgs]), 'img file is error'
+        assert np.all([os.path.exists(img) for img in img_files]), 'img file is error'
         # assert np.all([img.find('unknow') == -1 for img in self.imgs]), "img file can't contain unknow"
-        face_frames = [cv2.imread(img) for img in imgs]
-        encodings = [Person.face_encoding.encoding_face(face_frame) for face_frame in face_frames]
+        frames_box = [FrameBox(*FrameBox.parse_file(img_file)) for img_file in img_files]
+        encodings = [Person.face_encoding.encoding_frame_box(frame_box) for frame_box in frames_box]
         self.__encodings = encodings
 
         if is_new:
-            self.face_frames_limit = LimitList(new_face_frame_max)
+            self.frames_box_limit = LimitList(new_face_frame_max)
             self.__encodings = []
 
         logger.info('new persion %s' % (str([np.sum(encoding) for encoding in self.encodings_valid()])))
 
-    def new_img(self, img):
+    def new_frame_box(self, frame_box):
         if self.is_new:
-            self.face_frames_limit.append(img) and self.__encodings.append(Person.face_encoding.encoding_face(img))
+            self.frames_box_limit.append(frame_box) and self.__encodings.append(
+                Person.face_encoding.encoding_frame_box(frame_box))
 
     def encodings_valid(self):
         return [x for x in self.__encodings if x is not None and len(x)]
@@ -240,10 +266,8 @@ class Person(object):
             dir_path = Person.img_dir + '/' + self.person_name + '/'
             if not os.path.exists(dir_path):
                 os.mkdir(dir_path)
-            for index, face_frame in enumerate(self.face_frames_limit):
-                if face_frame is None or len(face_frame) == 0:
-                    continue
-                cv2.imwrite(dir_path + "{0:02d}.png".format(index), face_frame)
+            for frame_box in self.frames_box_limit:
+                cv2.imwrite(dir_path + frame_box.name, frame_box.frame)
             self.is_new = False
 
 
@@ -278,7 +302,7 @@ class Track(object):
 
     def update_img(self, frame, box, encoding):
         self.img = frame[box[1]:box[1] + box[3], box[0]:box[0] + box[2]]
-        self.match_person.new_img(self.img)
+        self.match_person.new_frame_box(FrameBox(frame, box))
         self.encoding = encoding
         self.frame = frame
         iter_num = next(self.__history_iter)
