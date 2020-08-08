@@ -203,16 +203,18 @@ class Person(object):
     @staticmethod
     def get_unknow_name():
         Person.__unknow_max_id += 1
-        return "unknow%s{0:03d}".format(Person.__unknow_max_id)
+        return "unknow{0:03d}".format(Person.__unknow_max_id)
 
     def save(self):
         if self.is_new:
+            dir_path = Person.img_dir + '/' + self.person_name + '/'
+            if not os.path.exists(dir_path):
+                os.mkdir(dir_path)
             for index, face_frame in enumerate(self.face_frames):
-                cv2.imwrite(Person.img_dir + "{}/{0:02d}".format(self.person_name, index))
+                if face_frame is None or len(face_frame) == 0:
+                    continue
+                cv2.imwrite(dir_path + "{0:02d}.png".format(index), face_frame)
             self.is_new = False
-
-    def __del__(self):
-        self.save()
 
 
 # img_items,[(file_name,img_frame)]
@@ -264,11 +266,12 @@ class Track(object):
                        person in
                        persons]
         logger.info('find_person self.encodings %s ' % (str(np.sum(self.encoding))))
-        if min(person_dist) < tolerance:
+        if min(person_dist, default=1.0) < tolerance:
             min_dist_index = np.argmin(person_dist)
             self.match_person = persons[min_dist_index]
         else:
             self.match_person = Person.new_unknow_person()
+            persons.append(self.match_person)
 
     def alive(self):
         return sum(self.__history) > 0
@@ -348,6 +351,7 @@ class DetectionTrack(object):
         del self.video_write_map[ipc_name]
 
         del self.detecton_freq_iter_map[ipc_name]
+        [tracker.match_person.save() for tracker in self.tracks_map[ipc_name]]
         del self.tracks_map[ipc_name]
         del self.frame_queue_map[ipc_name]
         self.cv_map[ipc_name].release()
@@ -446,6 +450,7 @@ class DetectionTrack(object):
                                           self.persons_map[ipc_name], event_call_back=self.event_call_back))
 
         # keep alive tracks only
+        [tracker.match_person.save() for tracker in self.tracks_map[ipc_name] if not tracker.alive()]
         self.tracks_map[ipc_name] = [tracker for tracker in self.tracks_map[ipc_name] if tracker.alive()]
         self.tracks_map[ipc_name].extend(new_trackers)
 
