@@ -71,9 +71,6 @@ class Util(object):
         return filepath, shotname, extension
 
 
-persons_files = Util.get_dirs_files(PERSON_IMG_DIR)
-
-
 class FaceDetectionFrFoc(object):
     @staticmethod
     def detection(frame):
@@ -189,7 +186,7 @@ class FrameBox(object):
     def __init__(self, frame=None, box=None):
         assert (frame is not None and box is not None), 'bad param'
         self.frame = frame
-        self.box = list(map(int,box))
+        self.box = list(map(int, box))
 
     @property
     def name(self):
@@ -229,7 +226,8 @@ class Person(object):
     face_encoding = None
     img_dir = ''
 
-    def __init__(self, person_name, img_files, is_new=False, new_face_frame_max=10):
+    def __init__(self, person_name, img_files, ipc_name, is_new=False, new_face_frame_max=10):
+        self.ipc_name = ipc_name
         self.is_new = is_new
         self.person_name = person_name
         assert np.all([os.path.exists(img) for img in img_files]), 'img file is error'
@@ -253,8 +251,8 @@ class Person(object):
         return [x for x in self.__encodings if x is not None and len(x)]
 
     @staticmethod
-    def new_unknow_person():
-        return Person(Person.get_unknow_name(), list(), is_new=True)
+    def new_unknow_person(ipc_name):
+        return Person(Person.get_unknow_name(), list(), ipc_name=ipc_name, is_new=True)
 
     @staticmethod
     def get_unknow_name():
@@ -263,12 +261,21 @@ class Person(object):
 
     def save(self):
         if self.is_new:
-            dir_path = Person.img_dir + '/' + self.person_name + '/'
+            dir_path = Person.img_dir + self.ipc_name + '/' + self.person_name + '/'
             if not os.path.exists(dir_path):
-                os.mkdir(dir_path)
+                os.makedirs(dir_path)
             for frame_box in self.frames_box_limit:
                 cv2.imwrite(dir_path + frame_box.name, frame_box.frame)
             self.is_new = False
+
+    @staticmethod
+    def get_camera_person_files(cameras_dir):
+        assert os.path.exists(cameras_dir) and os.path.isdir(cameras_dir), 'dir is illegal'
+        camera_person_dict = defaultdict(dict)
+        for camera_dir in os.listdir(cameras_dir):
+            if os.path.isdir(cameras_dir + '/' + camera_dir):
+                camera_person_dict[camera_dir] = Util.get_dirs_files(cameras_dir + '/' + camera_dir + '/')
+        return camera_person_dict
 
 
 # img_items,[(file_name,img_frame)]
@@ -324,7 +331,7 @@ class Track(object):
             min_dist_index = np.argmin(person_dist)
             self.match_person = persons[min_dist_index]
         else:
-            self.match_person = Person.new_unknow_person()
+            self.match_person = Person.new_unknow_person(ipc_name=self.ipc_name)
             persons.append(self.match_person)
 
     def alive(self):
@@ -336,7 +343,7 @@ class Track(object):
 
 
 class DetectionTrack(object):
-    def __init__(self, face_detector, face_encoding, detecton_freq, persons_map):
+    def __init__(self, face_detector, face_encoding, detecton_freq, camera_persons):
         self.__last_frame = None
         self.detecton_freq = detecton_freq
         self.detecton_freq_iter_map = dict()
@@ -351,7 +358,7 @@ class DetectionTrack(object):
         self.cv_map = dict()
         self.video_write_map = dict()
         self.ipc_infos = None
-        self.persons_map = persons_map
+        self.persons_map = camera_persons
         self.event_df = pd.DataFrame(
             columns=['ipc_name', 'event_name', 'datetime', 'track_id', 'img_file', 'box', 'person_name'])
 
@@ -528,14 +535,19 @@ class DetectionTrack(object):
         return temp
 
 
+camere_persons_files = Person.get_camera_person_files(PERSON_IMG_DIR)
 if __name__ == '__main__':
     ipc_infos = [{'name': 'test1', 'path': 'video/1.mp4'}]
     face_encoding = FaceFactory.get_encoding("DLIB_REG")
     # persons = person_df.apply(lambda x: Person(face_encoding, x['imgs'].split(' ')), axis=1)
     Person.face_encoding = face_encoding
     Person.img_dir = PERSON_IMG_DIR
-    persons = [Person(name, files) for name, files in persons_files.items()]
-    persons_map = {'test1': persons, 'test11': persons}
+
+    camera_persons = defaultdict(list)
+    [camera_persons[camera_name].append(Person(person_name, person_file, camera_name)) for camera_name, persons_map in
+     camere_persons_files for person_name, person_files in persons_map.items() for person_file in person_files]
+
+    # persons_map = {'test1': persons, 'test11': persons}
     face_detector = FaceFactory.get_detection('CV_CAS')
-    detection_track = DetectionTrack(face_detector, face_encoding, detecton_freq=20, persons_map=persons_map)
+    detection_track = DetectionTrack(face_detector, face_encoding, detecton_freq=20, camera_persons=camera_persons)
     detection_track.start_all(ipc_infos)
