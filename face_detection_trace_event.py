@@ -273,7 +273,7 @@ class Person(object):
         assert os.path.exists(cameras_dir) and os.path.isdir(cameras_dir), 'dir is illegal'
         camera_person_dict = defaultdict(dict)
         for camera_dir in os.listdir(cameras_dir):
-            if os.path.isdir(cameras_dir + '/' + camera_dir):
+            if os.path.isdir(cameras_dir + camera_dir):
                 camera_person_dict[camera_dir] = Util.get_dirs_files(cameras_dir + '/' + camera_dir + '/')
         return camera_person_dict
 
@@ -537,17 +537,17 @@ class DetectionTrack(object):
 
 camere_persons_files = Person.get_camera_person_files(PERSON_IMG_DIR)
 if __name__ == '__main__':
-    ipc_infos = [{'name': 'test1', 'path': 'video/1.mp4'}]
+    ipc_infos = [{'name': 'test1', 'path': 'video/1.mp4'},{'name': 'test2', 'path': 'video/2.mp4'}]
     face_encoding = FaceFactory.get_encoding("DLIB_REG")
     # persons = person_df.apply(lambda x: Person(face_encoding, x['imgs'].split(' ')), axis=1)
     Person.face_encoding = face_encoding
     Person.img_dir = PERSON_IMG_DIR
 
     camera_persons = defaultdict(list)
-    [camera_persons[camera_name].append(Person(person_name, person_file, camera_name)) for camera_name, persons_map in
-     camere_persons_files for person_name, person_files in persons_map.items() for person_file in person_files]
+    [camera_persons[camera_name].append(Person(person_name, person_files, camera_name)) for camera_name, persons_map in
+     camere_persons_files.items() for person_name, person_files in persons_map.items()]
 
-    # persons_map = {'test1': persons, 'test11': persons}
+    # camera_persons = {'test1': persons, 'test6': persons}
     face_detector = FaceFactory.get_detection('CV_CAS')
     detection_track = DetectionTrack(face_detector, face_encoding, detecton_freq=20, camera_persons=camera_persons)
     detection_track.start_all(ipc_infos)
