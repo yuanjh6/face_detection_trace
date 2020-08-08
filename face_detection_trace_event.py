@@ -166,6 +166,39 @@ class FaceFactory(object):
             return None
 
 
+class FrameBox(object):
+    def __init__(self, frame=None, box=None, img=None):
+        assert (img is not None) or (frame is not None and box is not None), 'bad param'
+        self.frame = frame
+        self.box = box
+        self.img = img
+
+    @property
+    def img_name(self):
+        return ''  # todo
+
+
+class LimitList(object):
+    def __init__(self, maxsize=10):
+        self.maxsize = maxsize
+        self.__list = list()
+
+    def append(self, item):
+        if len(self.__list) >= self.maxsize:
+            return False
+        else:
+            self.__list.append(item)
+            return True
+
+    def pop(self):
+        if len(self.__list) == 0:
+            return None
+        return self.__list.pop()
+
+    def __iter__(self):
+        return self.__list.__iter__()
+
+
 class Person(object):
     __unknow_max_id = 0
     face_encoding = None
@@ -181,17 +214,14 @@ class Person(object):
         self.__encodings = encodings
 
         if is_new:
-            self.face_frames = [None] * new_face_frame_max
-            self.face_frame_count = 0
-            self.__encodings = [None] * new_face_frame_max
+            self.face_frames_limit = LimitList(new_face_frame_max)
+            self.__encodings = []
 
         logger.info('new persion %s' % (str([np.sum(encoding) for encoding in self.encodings_valid()])))
 
     def new_img(self, img):
         if self.is_new:
-            self.face_frames[self.face_frame_count] = img
-            self.__encodings[self.face_frame_count] = Person.face_encoding.encoding_face(img)
-            self.face_frame_count = (self.face_frame_count + 1) % len(self.face_frames)
+            self.face_frames_limit.append(img) and self.__encodings.append(Person.face_encoding.encoding_face(img))
 
     def encodings_valid(self):
         return [x for x in self.__encodings if x is not None and len(x)]
@@ -210,7 +240,7 @@ class Person(object):
             dir_path = Person.img_dir + '/' + self.person_name + '/'
             if not os.path.exists(dir_path):
                 os.mkdir(dir_path)
-            for index, face_frame in enumerate(self.face_frames):
+            for index, face_frame in enumerate(self.face_frames_limit):
                 if face_frame is None or len(face_frame) == 0:
                     continue
                 cv2.imwrite(dir_path + "{0:02d}.png".format(index), face_frame)
