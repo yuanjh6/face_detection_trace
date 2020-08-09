@@ -435,8 +435,8 @@ class CapDetectionTrack(threading.Thread):
                 boxes = self.__face_track(last_frame)
             [Util.draw_boxes(last_frame, list(box)) for box in boxes]
             video_write.write(last_frame)
-            cv2.imshow(self.name, last_frame)
-            cv2.waitKey(1)
+            # cv2.imshow(self.name, last_frame)
+            # cv2.waitKey(1)
         video_write.release()
 
     def __face_dec(self, frame):
