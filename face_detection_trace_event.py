@@ -17,7 +17,7 @@ handler = logging.FileHandler("log.txt")
 handler.setLevel(logging.INFO)
 logger = logging.getLogger(__name__)
 logger.addHandler(handler)
-VIDEO_IMG = 'video_img'
+VIDEO_IN_OUT_IMGS = 'data/video_in_out_imgs/'
 PERSON_IMG_DIR = 'data/person_img/'
 
 
@@ -444,10 +444,10 @@ class CapDetectionTrack(threading.Thread):
     @staticmethod
     def event_call_back(type, ipc_name, track_id, frame=None, box=None, person_name=None):
         # type=0 enter, 1 out
-        # cv2.imwrite('%s/new_face_%s.png' % (VIDEO_IMG, track_id), frame)
+        cv2.imwrite('%s/new_face_%s.png' % (VIDEO_IN_OUT_IMGS, track_id), frame)
         logger.info(','.join((ipc_name, str(type),
                               datetime.now().strftime('%Y%m%d%H%M%S'), str(track_id),
-                              '%s/new_face_%s.png' % (VIDEO_IMG, track_id), str(box),
+                              '%s/new_face_%s.png' % (VIDEO_IN_OUT_IMGS, track_id), str(box),
                               person_name)))
 
     def __face_upgrade_track(self, frame, boxes):
