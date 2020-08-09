@@ -522,7 +522,6 @@ class DetectionTracksCtl(object):
             detecton_freq = ipc_info['detecton_freq']
             thread = CapDetectionTrack(ipc_info, is_realtime, face_detector, face_encoding, detecton_freq,
                                        camera_persons[ipc_name], face_decector_lock, face_encoding_lock)
-            print(id(thread.frame_queue))
             threads.append(thread)
         [thread.start() for thread in threads]
         [thread.join() for thread in threads]
