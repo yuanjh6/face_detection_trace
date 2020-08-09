@@ -368,6 +368,10 @@ class CapDetectionTrack(threading.Thread):
     def path(self):
         return self.ipc_info['path']
 
+    @property
+    def is_save_stranger(self):
+        return bool(self.ipc_info.get('save_stranger', 0))
+
     def run(self):
         self.is_start = True
 
@@ -463,8 +467,8 @@ class CapDetectionTrack(threading.Thread):
             # boxes_imgs_encoding = [boxes_imgs_encoding[0] for boxes_imgs_encoding in boxes_imgs_encodings if
             #                        boxes_imgs_encoding[:1]]
             # logger.info('####', np.array(boxes_imgs_encoding).shape)
-            [cv2.imwrite(str(np.sum(boxes_encoding)) + '.png', Util.cut_frame_box(frame, box))
-             for boxes_encoding, box in zip(boxes_imgs_encoding, boxes)]
+            # [cv2.imwrite(str(np.sum(boxes_encoding)) + '.png', Util.cut_frame_box(frame, box))
+            #  for boxes_encoding, box in zip(boxes_imgs_encoding, boxes)]
 
         box_track_ids = [
             np.array(track_ids, int)[face_recognition.compare_faces(track_encodings, unknown_face_encoding)] for
@@ -479,7 +483,8 @@ class CapDetectionTrack(threading.Thread):
                                           self.persons, event_call_back=self.event_call_back))
 
         # keep alive tracks only
-        [tracker.match_person.save() for tracker in self.tracks if not tracker.alive()]
+        if self.is_save_stranger:
+            [tracker.match_person.save() for tracker in self.tracks if not tracker.alive()]
         self.tracks = [tracker for tracker in self.tracks if tracker.alive()]
         self.tracks.extend(new_trackers)
 
@@ -489,7 +494,8 @@ class CapDetectionTrack(threading.Thread):
 
     def save_release_resouce(self):
         del self.detecton_freq_iter
-        [tracker.match_person.save() for tracker in self.tracks]
+        if self.is_save_stranger:
+            [tracker.match_person.save() for tracker in self.tracks]
         del self.tracks
         del self.frame_queue
 
@@ -538,8 +544,8 @@ class DetectionTracksCtl(object):
 
 camere_persons_files = Person.get_camera_person_files(PERSON_IMG_DIR)
 if __name__ == '__main__':
-    ipc_infos = [{'name': 'test1', 'path': 'video/1.mp4', 'realtime': 0, 'detecton_freq': 20},
-                 {'name': 'test2', 'path': 'video/2.mp4', 'realtime': 0, 'detecton_freq': 20}]
+    ipc_infos = [{'name': 'test1', 'path': 'video/1.mp4', 'realtime': 0, 'detecton_freq': 20, 'save_stranger': 1},
+                 {'name': 'test2', 'path': 'video/2.mp4', 'realtime': 0, 'detecton_freq': 20, 'save_stranger': 0}]
     face_encoding = FaceFactory.get_encoding("DLIB_REG")
     # persons = person_df.apply(lambda x: Person(face_encoding, x['imgs'].split(' ')), axis=1)
     Person.face_encoding = face_encoding
