@@ -342,146 +342,114 @@ class Track(object):
         return self.__id
 
 
-class DetectionTrack(object):
-    def __init__(self, face_detector, face_encoding, detecton_freq, camera_persons):
-        self.__last_frame = None
-        self.detecton_freq = detecton_freq
-        self.detecton_freq_iter_map = dict()
-        self.is_start_map = dict()
-        self.is_realtime = False  # only false ,code only support
-        self.tracks_map = dict()
-        self.cap_thread_map = dict()
-        self.det_thread = None
+class CapDetectionTrack(threading.Thread):
+    def __init__(self, ipc_info, is_realtime, face_detector, face_encoding, detecton_freq, persons):
+        super(CapDetectionTrack, self).__init__()
+        self.is_start = False
+
         self.face_detector = face_detector
         self.face_encoding = face_encoding
-        self.frame_queue_map = dict()
-        self.cv_map = dict()
-        self.video_write_map = dict()
-        self.ipc_infos = None
-        self.persons_map = camera_persons
-        self.event_df = pd.DataFrame(
-            columns=['ipc_name', 'event_name', 'datetime', 'track_id', 'img_file', 'box', 'person_name'])
 
-    def event_call_back(self, type, ipc_name, track_id, frame=None, box=None, person_name=None):
-        # type=0 enter, 1 out
-        cv2.imwrite('%s/new_face_%s.png' % (VIDEO_IMG, track_id), frame)
-        self.event_df.loc[self.event_df.shape[0]] = [ipc_name, type,
-                                                     datetime.now().strftime('%Y%m%d%H%M%S'), track_id,
-                                                     '%s/new_face_%s.png' % (VIDEO_IMG, track_id), box,
-                                                     person_name]
+        self.__last_frame = None
+        self.frame_queue = Queue(maxsize=60)
+        self.detecton_freq_iter = itertools.cycle(range(detecton_freq))
 
-    def start_all(self, ipc_infos):
-        # ipc_infos:list.map.key=ipc_url/ipc_name,list.map.value='xx/xx.mp4'/test01
-        self.ipc_infos = ipc_infos
-        for ipc_info in ipc_infos:
-            self.is_start_map[ipc_info['name']] = True
-            self.start_one(ipc_info['name'], ipc_info['path'])
-        self.det_thread = threading.Thread(target=self.__start_detection_trace)
-        self.det_thread.start()
+        self.is_realtime = is_realtime  # only false ,code only support
 
-    def start_one(self, ipc_name, ipc_path):
-        self.detecton_freq_iter_map[ipc_name] = itertools.cycle(range(self.detecton_freq))
-        self.tracks_map[ipc_name] = list()
-        self.frame_queue_map[ipc_name] = Queue()
-        self.cv_map[ipc_name] = cv2.VideoCapture(ipc_path)
+        self.tracks = list()
+        self.ipc_info = ipc_info
+        self.persons = persons
 
-        videoCapture = cv2.VideoCapture(ipc_path)
-        fps = videoCapture.get(cv2.CAP_PROP_FPS)
-        size = (
-            int(videoCapture.get(cv2.CAP_PROP_FRAME_WIDTH)),
-            int(videoCapture.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        )
-        out_file_path = "%s_output.avi" % ipc_path
-        videoWriter = cv2.VideoWriter(
+    @property
+    def name(self):
+        return self.ipc_info['name']
+
+    @property
+    def path(self):
+        return self.ipc_info['path']
+
+    def run(self):
+        self.is_start = True
+
+        cv_cap = cv2.VideoCapture(self.path)
+        size = (int(cv_cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cv_cap.get(cv2.CAP_PROP_FRAME_HEIGHT)))
+        out_file_path = "%s_output.avi" % self.path
+        video_write = cv2.VideoWriter(
             out_file_path,
             cv2.VideoWriter_fourcc('M', 'P', '4', '2'),  # 编码器
-            fps,
+            cv_cap.get(cv2.CAP_PROP_FPS),
             size
         )
 
-        self.video_write_map[ipc_name] = videoWriter
-        cap_thread = threading.Thread(target=self.__start_capture, args=(ipc_name,))
-        self.cap_thread_map[ipc_name] = cap_thread
+        cap_thread = threading.Thread(target=self.__start_capture, args=(cv_cap,))
         cap_thread.start()
 
-    def stop_one(self, ipc_name):
-        self.is_start_map[ipc_name] = False
-        self.cap_thread_map[ipc_name].join()
-        del self.cap_thread_map[ipc_name]
-        self.video_write_map[ipc_name].release()
-        del self.video_write_map[ipc_name]
+        dec_thread = threading.Thread(target=self.__start_detection_trace, args=(video_write,))
+        dec_thread.start()
 
-        del self.detecton_freq_iter_map[ipc_name]
-        [tracker.match_person.save() for tracker in self.tracks_map[ipc_name]]
-        del self.tracks_map[ipc_name]
-        del self.frame_queue_map[ipc_name]
-        self.cv_map[ipc_name].release()
-        del self.cv_map[ipc_name]
+        cap_thread.join()
+        dec_thread.join()
+        self.save_release_resouce()
 
-    def __start_capture(self, ipc_name):
-        cv_cap = self.cv_map[ipc_name]
-        frame_queue = self.frame_queue_map.get(ipc_name)
-        while self.is_start_map[ipc_name]:
-            ret, frame = cv_cap.read()
-            if ret:
-                if self.is_realtime:
+    def __start_capture(self, cv_cap):
+        if self.is_realtime:
+            while self.is_start:
+                ret, frame = cv_cap.read()
+                if ret:
                     self.__last_frame = frame
                 else:
-                    frame_queue.put(frame)
-            else:
-                if self.is_realtime:
-                    self.is_start_map[ipc_name] = False  # stop threading:_start_capture,_start_detection_trace
-                    break
+                    self.__last_frame = None
+                    self.is_start = False  # stop threading:_start_capture,_start_detection_trace
                     # todo enhance,some tail frame wo't be run by threading _start_detection_trace
-                else:
-                    frame_queue.put(None)
-                    break
 
-    def __get_last_frame(self, ipc_name):
-        # if self.is_realtime:
-        #     pass
-        # else:
-        #     pass
-        ret = self.frame_queue_map[ipc_name].get()
+        else:
+            while self.is_start:
+                ret, frame = cv_cap.read()
+                if ret:
+                    self.frame_queue.put(frame)
+                else:
+                    self.frame_queue.put(None)
+                    self.is_start = False
+        cv_cap.release()
+
+    def __get_last_frame(self):
+        ret = self.__last_frame if self.is_realtime else self.frame_queue.get()
+        self.__last_frame = None
         return ret
 
-    def __start_detection_trace(self):
-        ipc_name_iter = itertools.cycle([ipc_info['name'] for ipc_info in self.ipc_infos])
-        while np.any(list(self.is_start_map.values())):
-            ipc_name = next(ipc_name_iter)
-            while self.is_start_map[ipc_name]:
-                last_frame = self.__get_last_frame(ipc_name)
-                if last_frame is None:
-                    if self.is_realtime:
-                        continue
-                    else:
-                        self.stop_one(ipc_name)
-                        continue
-                if next(self.detecton_freq_iter_map[ipc_name]) == 0:
-                    boxes = self.__face_dec(last_frame, ipc_name)
-                else:
-                    boxes = self.__face_track(last_frame, ipc_name)
-                [Util.draw_boxes(last_frame, list(box)) for box in boxes]
-                self.video_write_map[ipc_name].write(last_frame)
-                # cv2.imshow('xx', last_frame)
-                # cv2.waitKey(1)
-        self.after_all_stop()
+    def __start_detection_trace(self, video_write):
+        while self.is_start:
+            last_frame = self.__get_last_frame()
+            if last_frame is None:
+                continue
+            if next(self.detecton_freq_iter) == 0:
+                boxes = self.__face_dec(last_frame)
+            else:
+                boxes = self.__face_track(last_frame)
+            [Util.draw_boxes(last_frame, list(box)) for box in boxes]
+            video_write.write(last_frame)
+            # cv2.imshow('xx', last_frame)
+            # cv2.waitKey(1)
+        video_write.release()
 
-    def after_all_stop(self):
-        self.event_df['img_file'] = self.event_df['img_file'].apply(lambda x: "<img src='%s'>" % x)
-        event_name_map = {0: '进', 1: '出'}
-        self.event_df['event_name'] = self.event_df['event_name'].map(event_name_map)
-        self.event_df.to_html('event.html')
-
-    def __face_dec(self, frame, ipc_name):
+    def __face_dec(self, frame):
         boxes = self.face_detector.detection(frame)
-        self.__face_upgrade_track(frame, boxes, ipc_name)
+        self.__face_upgrade_track(frame, boxes)
         return boxes
 
-    def __face_upgrade_track(self, frame, boxes, ipc_name):
-        tracks_map = {track.id: track for track in self.tracks_map[ipc_name]}
-        track_ids, track_encodings = list(map(lambda x: x.id, self.tracks_map[ipc_name])), list(
-            map(lambda x: x.encoding, self.tracks_map[ipc_name]))
+    @staticmethod
+    def event_call_back(type, ipc_name, track_id, frame=None, box=None, person_name=None):
+        # type=0 enter, 1 out
+        # cv2.imwrite('%s/new_face_%s.png' % (VIDEO_IMG, track_id), frame)
+        logger.info(','.join((ipc_name, str(type),
+                              datetime.now().strftime('%Y%m%d%H%M%S'), str(track_id),
+                              '%s/new_face_%s.png' % (VIDEO_IMG, track_id), str(box),
+                              person_name)))
+
+    def __face_upgrade_track(self, frame, boxes):
+        tracks_map = {track.id: track for track in self.tracks}
+        track_ids, track_encodings = list(map(lambda x: x.id, self.tracks)), list(
+            map(lambda x: x.encoding, self.tracks))
         boxes_imgs_encoding = list()
         if boxes is not None and len(boxes):
             boxes_imgs_encoding = [self.face_encoding.encoding(frame, box) for box in boxes]
@@ -507,17 +475,50 @@ class DetectionTrack(object):
             if len(box_track_id) > 0:
                 tracks_map[box_track_id[0]].update_img(frame, boxes_img, boxes_img_encoding)
             else:
-                new_trackers.append(Track(ipc_name, cv2.TrackerKCF_create(), frame, boxes_img, boxes_img_encoding,
-                                          self.persons_map[ipc_name], event_call_back=self.event_call_back))
+                new_trackers.append(Track(self.name, cv2.TrackerKCF_create(), frame, boxes_img, boxes_img_encoding,
+                                          self.persons, event_call_back=self.event_call_back))
 
         # keep alive tracks only
-        [tracker.match_person.save() for tracker in self.tracks_map[ipc_name] if not tracker.alive()]
-        self.tracks_map[ipc_name] = [tracker for tracker in self.tracks_map[ipc_name] if tracker.alive()]
-        self.tracks_map[ipc_name].extend(new_trackers)
+        [tracker.match_person.save() for tracker in self.tracks if not tracker.alive()]
+        self.tracks = [tracker for tracker in self.tracks if tracker.alive()]
+        self.tracks.extend(new_trackers)
 
-    def __face_track(self, frame, ipc_name):
-        boxes = [list(map(int, track.update(frame)[1])) for track in self.tracks_map[ipc_name]]
+    def __face_track(self, frame):
+        boxes = [list(map(int, track.update(frame)[1])) for track in self.tracks]
         return boxes
+
+    def save_release_resouce(self):
+        del self.detecton_freq_iter
+        [tracker.match_person.save() for tracker in self.tracks]
+        del self.tracks
+        del self.frame_queue
+
+
+class DetectionTracksCtl(object):
+    def __init__(self, face_detector, face_encoding):
+        self.face_detector = face_detector
+        self.face_encoding = face_encoding
+
+    def start_all(self, ipc_infos, camera_persons):
+        # ipc_infos:list.map.key=ipc_url/ipc_name,list.map.value='xx/xx.mp4'/test01
+        threads = list()
+        for ipc_info in ipc_infos:
+            ipc_name = ipc_info['name']
+            is_realtime = ipc_info['realtime']
+            detecton_freq = ipc_info['detecton_freq']
+            thread = CapDetectionTrack(ipc_info, is_realtime, face_detector, face_encoding, detecton_freq,
+                                       camera_persons[ipc_name])
+            threads.append(thread)
+        [thread.start() for thread in threads]
+        [thread.join() for thread in threads]
+        self.__after_all_stop()
+
+    def __after_all_stop(self):
+        print('__after_all_stop')
+        # self.event_df['img_file'] = self.event_df['img_file'].apply(lambda x: "<img src='%s'>" % x)
+        # event_name_map = {0: '进', 1: '出'}
+        # self.event_df['event_name'] = self.event_df['event_name'].map(event_name_map)
+        # self.event_df.to_html('event.html')
 
     # todo 01 use diff change to decation detection ,02,use yield change param
     # ref Human-detection-and-Tracking
@@ -537,7 +538,8 @@ class DetectionTrack(object):
 
 camere_persons_files = Person.get_camera_person_files(PERSON_IMG_DIR)
 if __name__ == '__main__':
-    ipc_infos = [{'name': 'test1', 'path': 'video/1.mp4'},{'name': 'test2', 'path': 'video/2.mp4'}]
+    ipc_infos = [{'name': 'test1', 'path': 'video/1.mp4', 'realtime': 0, 'detecton_freq': 20},
+                 {'name': 'test2', 'path': 'video/2.mp4', 'realtime': 0, 'detecton_freq': 20}]
     face_encoding = FaceFactory.get_encoding("DLIB_REG")
     # persons = person_df.apply(lambda x: Person(face_encoding, x['imgs'].split(' ')), axis=1)
     Person.face_encoding = face_encoding
@@ -549,5 +551,5 @@ if __name__ == '__main__':
 
     # camera_persons = {'test1': persons, 'test6': persons}
     face_detector = FaceFactory.get_detection('CV_CAS')
-    detection_track = DetectionTrack(face_detector, face_encoding, detecton_freq=20, camera_persons=camera_persons)
-    detection_track.start_all(ipc_infos)
+    detection_track = DetectionTracksCtl(face_detector, face_encoding)
+    detection_track.start_all(ipc_infos, camera_persons=camera_persons)
