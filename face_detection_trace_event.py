@@ -1,6 +1,7 @@
 import json
 import os
 from collections import defaultdict
+from typing import Tuple, Dict, List
 
 import dlib
 import itertools
@@ -8,10 +9,25 @@ import logging
 import threading
 from datetime import datetime
 from queue import Queue
-import pandas as pd
 import cv2
 import face_recognition
 import numpy as np
+
+"""
+人脸自动录入和识别,并生成事件形式的打卡记录
+
+自动录入:未识别头像自动采集到到指定文件夹,如果是公司员工,修改文件夹名称将未识别头像变成公司内部员工
+打卡记录:通过人脸检测,跟踪,识别(特征值提取),比对底库,等生成人员打卡记录
+
+帮助:python face_detection_trace_event.py -h
+optional arguments:
+  -c CONFIG_PATH, --config_path :配置文件路径
+  -fe FACE_ENCODING, --face_encoding :人脸特征值提取算法
+  -pimg PERSON_IMAGE_DIR, --person_image_dir :人脸头像图片保存路径
+  -vimg VIDEO_IMAGE_DIR, --video_image_dir :视频图片保存路径
+
+使用示例:python face_detection_trace_event.py -c config.json 
+"""
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 handler = logging.FileHandler("log.txt")
@@ -21,17 +37,24 @@ logger.addHandler(handler)
 
 
 class Util(object):
-    @staticmethod
-    def fl_to_cv_box(rect):  # 获得人脸矩形的坐标信息
-        top, right, bottom, left = rect
-        x = left
-        y = top
-        w = right - left
-        h = bottom - top
-        return x, y, w, h
+    """
+    工具类
+
+    主要包括坐标系转换,画框,图片特定区域切割,以及文件夹遍历等工具类
+
+    坐标系转换:由于调用了不同的工具包,不同包的坐标标识方法是不同的,为了保持内部变量含义统一性,程序内部均采用opencv坐标系
+    """
 
     @staticmethod
-    def cv_to_fl_box(rect):  # 获得人脸矩形的坐标信息
+    def cv_to_fl_box(rect: Tuple[int, int, int, int]) -> Tuple[int, int, int, int]:
+        """
+       坐标系转换
+
+       将opencv坐标转为face_recognition的face_locations坐标
+
+       :param rect: opencv坐标
+       :return:face_recognition.face_locations中的坐标
+        """
         x, y, w, h = rect
         left = x
         top = y
@@ -40,16 +63,31 @@ class Util(object):
         return top, right, bottom, left
 
     @staticmethod
-    def draw_boxes(frame, box):
+    def draw_boxes(frame, box: Tuple[int, int, int, int]):
+        """
+        矩形框绘制
+        """
         x, y, w, h = box
         cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
 
     @staticmethod
-    def cut_frame_box(frame, box):
+    def cut_frame_box(frame, box: Tuple[int, int, int, int]):
+        """
+        从图片中截取出矩形区域
+        :param frame: 图片,h,w,s格式的3维数组
+        :param box: 矩形框
+        :return: 矩形框内的图片,h,w,s格式的3维数组
+        """
         return frame[box[1]:box[1] + box[3], box[0]:box[0] + box[2]]
 
     @staticmethod
-    def get_dirs_files(dir):
+    def get_dirs_files(dir: str) -> Dict[str, List[str]]:
+        """
+        获取dir下的所有文件列表
+
+        :param dir: 目录路径
+        :return:dict,key:person name,value:list,person face img
+        """
         name_files_map = defaultdict(list)
         assert os.path.exists(dir) and os.path.isdir(dir), "dir is illegal"
         # for sub_dir in os.listdir(dir):
@@ -64,7 +102,13 @@ class Util(object):
         return name_files_map
 
     @staticmethod
-    def get_file_path_split(filename):
+    def get_file_path_split(filename: str) -> Tuple[str, str, str]:
+        """
+        将文件全路径拆分为文件目录路径,文件名,文件扩展名
+
+        :param filename: 文件全路径
+        :return: tuple,文件目录路径,文件名,文件扩展名
+        """
         (filepath, tempfilename) = os.path.split(filename);
         (shotname, extension) = os.path.splitext(tempfilename);
         return filepath, shotname, extension
@@ -72,9 +116,32 @@ class Util(object):
 
 class FaceDetectionFrFoc(object):
     @staticmethod
-    def detection(frame):
+    def fl_to_cv_box(rect: Tuple[int, int, int, int]) -> Tuple[int, int, int, int]:
+        """
+        坐标系转换
+
+        将face_recognition的face_locations坐标转为opencv坐标系坐标
+
+        :param rect: face_locations中的坐标
+        :return:opencv中的坐标系
+        """
+        top, right, bottom, left = rect
+        x = left
+        y = top
+        w = right - left
+        h = bottom - top
+        return x, y, w, h
+
+    @staticmethod
+    def detection(frame) -> List[Tuple[str, str, str, str]]:
+        """
+        图片中所有的人脸矩形框坐标
+
+        :param frame: 图片,h,w,s三维数组格式
+        :return: List[tuple],每个tuple都是(int,int,int,int)形式的opencv的矩形坐标
+        """
         boxes = face_recognition.face_locations(frame)
-        boxes = [Util.fl_to_cv_box(box) for box in boxes]
+        boxes = [FaceDetectionFrFoc.fl_to_cv_box(box) for box in boxes]
         return boxes
 
 
@@ -83,7 +150,15 @@ class FaceDetectionDlibFro(object):
         self.face_detector = dlib.get_frontal_face_detector()
 
     @staticmethod
-    def dlib_box_to_cv(rectangle):
+    def dlib_box_to_cv(rectangle: Tuple[int, int, int, int]) -> Tuple[int, int, int, int]:
+        """
+        坐标系转换
+
+        将dlib的rectangle坐标转为opencv坐标系坐标
+
+        :param rectangle: dlib的rectangle坐标
+        :return:opencv中的坐标系
+        """
         x, y, w, h = rectangle.left(), rectangle.top(), rectangle.right() - rectangle.left(), rectangle.bottom() - rectangle.top()
         return x, y, w, h
 
@@ -97,8 +172,10 @@ class FaceDetectionDlibFro(object):
 
 
 class FaceDetectionCvCas(object):
-    def __init__(self, face_add):
-        self.face_detector = cv2.CascadeClassifier(face_add)
+    cascade_xml = "model/haarcascade_frontalface_default.xml"
+
+    def __init__(self):
+        self.face_detector = cv2.CascadeClassifier(FaceDetectionCvCas.cascade_xml)
 
     def detection(self, frame):
         boxes = self.face_detector.detectMultiScale(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), 1.15, 5)
@@ -174,7 +251,7 @@ class FaceFactory(object):
         if name == "FR_FL":
             return FaceDetectionFrFoc()
         elif name == "CV_CAS":
-            return FaceDetectionCvCas(face_add="model/haarcascade_frontalface_default.xml")
+            return FaceDetectionCvCas()
         elif name == "DLIB_FRO":
             return FaceDetectionDlibFro()
         else:
@@ -572,10 +649,10 @@ if __name__ == "__main__":
     face_encoding_config = args.face_encoding or config_json.get("face_encoding", "DLIB_REG")
     person_image_dir_config = args.person_image_dir or config_json.get("person_image_dir", "data/person_img/")
     video_image_dir_config = args.video_image_dir or config_json.get("video_image_dir", "data/video_imgs/")
-    
+
     os.path.exists(person_image_dir_config) or os.makedirs(person_image_dir_config)
     os.path.exists(video_image_dir_config) or os.makedirs(video_image_dir_config)
-    
+
     CapDetectionTrack.video_imgs = video_image_dir_config
 
     face_encoding = FaceFactory.get_encoding(face_encoding_config)
