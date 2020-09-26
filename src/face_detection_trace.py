@@ -20,14 +20,14 @@ import numpy as np
 自动录入:未识别头像自动采集到到指定文件夹,如果是公司员工,修改文件夹名称将未识别头像变成公司内部员工
 打卡记录:通过人脸检测,跟踪,识别(特征值提取),比对底库,等生成人员打卡记录
 
-帮助:python face_detection_trace_event.py -h
+帮助:python face_detection_trace.py -h
 optional arguments:
   -c CONFIG_PATH, --config_path :配置文件路径
   -fe FACE_ENCODING, --face_encoding :人脸特征值提取算法
   -pimg PERSON_IMAGE_DIR, --person_image_dir :人脸图片保存路径
   -vimg VIDEO_IMAGE_DIR, --video_image_dir :视频图片保存路径
 
-使用示例:python face_detection_trace_event.py -c config.json 
+使用示例:python face_detection_trace.py -c config.json 
 """
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
