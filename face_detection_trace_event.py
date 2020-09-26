@@ -1,3 +1,4 @@
+import json
 import os
 from collections import defaultdict
 
@@ -12,13 +13,11 @@ import cv2
 import face_recognition
 import numpy as np
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 handler = logging.FileHandler("log.txt")
 handler.setLevel(logging.INFO)
 logger = logging.getLogger(__name__)
 logger.addHandler(handler)
-VIDEO_IN_OUT_IMGS = 'data/video_in_out_imgs/'
-PERSON_IMG_DIR = 'data/person_img/'
 
 
 class Util(object):
@@ -52,16 +51,16 @@ class Util(object):
     @staticmethod
     def get_dirs_files(dir):
         name_files_map = defaultdict(list)
-        assert os.path.exists(dir) and os.path.isdir(dir), 'dir is illegal'
+        assert os.path.exists(dir) and os.path.isdir(dir), "dir is illegal"
         # for sub_dir in os.listdir(dir):
         #     if os.path.isdir(dir):
-        #         for file_path in os.listdir(dir + sub_dir + '/'):
-        #             if os.path.isfile(dir + sub_dir + '/' + file_path):
+        #         for file_path in os.listdir(dir + sub_dir + "/"):
+        #             if os.path.isfile(dir + sub_dir + "/" + file_path):
         #                 name_files_map[sub_dir].append(file_path)
 
-        [name_files_map[sub_dir].append(dir + sub_dir + '/' + file_path) for sub_dir in os.listdir(dir) if
+        [name_files_map[sub_dir].append(dir + sub_dir + "/" + file_path) for sub_dir in os.listdir(dir) if
          os.path.isdir(dir) for file_path
-         in os.listdir(dir + sub_dir + '/') if os.path.isfile(dir + sub_dir + '/' + file_path)]
+         in os.listdir(dir + sub_dir + "/") if os.path.isfile(dir + sub_dir + "/" + file_path)]
         return name_files_map
 
     @staticmethod
@@ -163,9 +162,9 @@ class FaceEncodingDlibReg(object):
 class FaceFactory(object):
     @staticmethod
     def get_encoding(name):
-        if name == 'FR_FE':
+        if name == "FR_FE":
             return FaceEncodingFrFe()
-        elif name == 'DLIB_REG':
+        elif name == "DLIB_REG":
             return FaceEncodingDlibReg()
         else:
             return None
@@ -184,19 +183,19 @@ class FaceFactory(object):
 
 class FrameBox(object):
     def __init__(self, frame=None, box=None):
-        assert (frame is not None and box is not None), 'bad param'
+        assert (frame is not None and box is not None), "bad param"
         self.frame = frame
         self.box = list(map(int, box))
 
     @property
     def name(self):
-        return '_'.join(map(str, self.box)) + '.png'
+        return "_".join(map(str, self.box)) + ".png"
 
     @staticmethod
     def parse_file(file_name):
         frame = cv2.imread(file_name)
         file_path, file_name, file_ext = Util.get_file_path_split(file_name)
-        box = file_name.split('_')
+        box = file_name.split("_")
         return frame, box
 
 
@@ -224,14 +223,14 @@ class LimitList(object):
 class Person(object):
     __unknow_max_id = 0
     face_encoding = None
-    img_dir = ''
+    img_dir = ""
 
     def __init__(self, person_name, img_files, ipc_name, is_new=False, new_face_frame_max=10):
         self.ipc_name = ipc_name
         self.is_new = is_new
         self.person_name = person_name
-        assert np.all([os.path.exists(img) for img in img_files]), 'img file is error'
-        # assert np.all([img.find('unknow') == -1 for img in self.imgs]), "img file can't contain unknow"
+        assert np.all([os.path.exists(img) for img in img_files]), "img file is error"
+        # assert np.all([img.find("unknow") == -1 for img in self.imgs]), "img file can"t contain unknow"
         frames_box = [FrameBox(*FrameBox.parse_file(img_file)) for img_file in img_files]
         encodings = [Person.face_encoding.encoding_frame_box(frame_box) for frame_box in frames_box]
         self.__encodings = encodings
@@ -240,7 +239,7 @@ class Person(object):
             self.frames_box_limit = LimitList(new_face_frame_max)
             self.__encodings = []
 
-        logger.info('new persion %s' % (str([np.sum(encoding) for encoding in self.encodings_valid()])))
+        logger.info("new persion %s" % (str([np.sum(encoding) for encoding in self.encodings_valid()])))
 
     def new_frame_box(self, frame_box):
         if self.is_new:
@@ -261,7 +260,7 @@ class Person(object):
 
     def save(self):
         if self.is_new:
-            dir_path = Person.img_dir + self.ipc_name + '/' + self.person_name + '/'
+            dir_path = Person.img_dir + self.ipc_name + "/" + self.person_name + "/"
             if not os.path.exists(dir_path):
                 os.makedirs(dir_path)
             for frame_box in self.frames_box_limit:
@@ -270,11 +269,11 @@ class Person(object):
 
     @staticmethod
     def get_camera_person_files(cameras_dir):
-        assert os.path.exists(cameras_dir) and os.path.isdir(cameras_dir), 'dir is illegal'
+        assert os.path.exists(cameras_dir) and os.path.isdir(cameras_dir), "dir is illegal"
         camera_person_dict = defaultdict(dict)
         for camera_dir in os.listdir(cameras_dir):
             if os.path.isdir(cameras_dir + camera_dir):
-                camera_person_dict[camera_dir] = Util.get_dirs_files(cameras_dir + '/' + camera_dir + '/')
+                camera_person_dict[camera_dir] = Util.get_dirs_files(cameras_dir + "/" + camera_dir + "/")
         return camera_person_dict
 
 
@@ -326,7 +325,7 @@ class Track(object):
         person_dist = [min(face_recognition.face_distance(person.encodings_valid(), self.encoding), default=1.0) for
                        person in
                        persons]
-        logger.info('find_person self.encodings %s ' % (str(np.sum(self.encoding))))
+        logger.info("find_person self.encodings %s " % (str(np.sum(self.encoding))))
         if min(person_dist, default=1.0) < tolerance:
             min_dist_index = np.argmin(person_dist)
             self.match_person = persons[min_dist_index]
@@ -343,7 +342,9 @@ class Track(object):
 
 
 class CapDetectionTrack(threading.Thread):
-    def __init__(self, ipc_info, is_realtime, face_detector, face_encoding, detecton_freq, persons, face_decector_lock,
+    video_imgs = None
+
+    def __init__(self, ipc_info, is_realtime, face_detector, face_encoding, detection_freq, persons, face_decector_lock,
                  face_encoding_lock):
         super(CapDetectionTrack, self).__init__()
         self.is_start = False
@@ -355,7 +356,7 @@ class CapDetectionTrack(threading.Thread):
 
         self.__last_frame = None
         self.frame_queue = Queue(maxsize=60)
-        self.detecton_freq_iter = itertools.cycle(range(detecton_freq))
+        self.detection_freq_iter = itertools.cycle(range(detection_freq))
 
         self.is_realtime = is_realtime
 
@@ -365,15 +366,15 @@ class CapDetectionTrack(threading.Thread):
 
     @property
     def name(self):
-        return self.ipc_info['name']
+        return self.ipc_info["name"]
 
     @property
     def path(self):
-        return self.ipc_info['path']
+        return self.ipc_info["path"]
 
     @property
     def is_save_stranger(self):
-        return bool(self.ipc_info.get('save_stranger', 0))
+        return bool(self.ipc_info.get("save_stranger", 0))
 
     def run(self):
         self.is_start = True
@@ -383,7 +384,7 @@ class CapDetectionTrack(threading.Thread):
         out_file_path = "%s_output.avi" % self.path
         video_write = cv2.VideoWriter(
             out_file_path,
-            cv2.VideoWriter_fourcc('M', 'P', '4', '2'),  # 编码器
+            cv2.VideoWriter_fourcc("M", "P", "4", "2"),  # 编码器
             cv_cap.get(cv2.CAP_PROP_FPS),
             size
         )
@@ -407,7 +408,7 @@ class CapDetectionTrack(threading.Thread):
                 else:
                     self.__last_frame = None
                     self.is_start = False  # stop threading:_start_capture,_start_detection_trace
-                    # todo enhance,some tail frame wo't be run by threading _start_detection_trace
+                    # todo enhance,some tail frame wo"t be run by threading _start_detection_trace
 
         else:
             while self.is_start:
@@ -429,7 +430,7 @@ class CapDetectionTrack(threading.Thread):
             last_frame = self.__get_last_frame()
             if last_frame is None:
                 continue
-            if next(self.detecton_freq_iter) == 0:
+            if next(self.detection_freq_iter) == 0:
                 boxes = self.__face_dec(last_frame)
             else:
                 boxes = self.__face_track(last_frame)
@@ -448,10 +449,10 @@ class CapDetectionTrack(threading.Thread):
     @staticmethod
     def event_call_back(type, ipc_name, track_id, frame=None, box=None, person_name=None):
         # type=0 enter, 1 out
-        cv2.imwrite('%snew_face_%s.png' % (VIDEO_IN_OUT_IMGS, track_id), frame)
-        logger.info(','.join((ipc_name, str(type),
-                              datetime.now().strftime('%Y%m%d%H%M%S'), str(track_id),
-                              '%snew_face_%s.png' % (VIDEO_IN_OUT_IMGS, track_id), str(box),
+        cv2.imwrite("%snew_face_%s.png" % (CapDetectionTrack.video_imgs, track_id), frame)
+        logger.info(",".join((ipc_name, str(type),
+                              datetime.now().strftime("%Y%m%d%H%M%S"), str(track_id),
+                              "%snew_face_%s.png" % (CapDetectionTrack.video_imgs, track_id), str(box),
                               person_name)))
 
     def __face_upgrade_track(self, frame, boxes):
@@ -466,13 +467,13 @@ class CapDetectionTrack(threading.Thread):
                                      boxes_img_encoding in boxes_imgs_encoding]
             boxes = np.array(boxes)[boxes_encoding_filter]
             boxes_imgs_encoding = np.array(boxes_imgs_encoding)[boxes_encoding_filter]
-            # logger.info('###', np.array(boxes_imgs_encoding).shape)
+            # logger.info("###", np.array(boxes_imgs_encoding).shape)
             # boxes_imgs_encodings = [
             #     face_recognition.face_encodings(frame[(box[1]):(box[1] + box[3]), (box[0]):(box[0] + box[2])]) for box in boxes]
             # boxes_imgs_encoding = [boxes_imgs_encoding[0] for boxes_imgs_encoding in boxes_imgs_encodings if
             #                        boxes_imgs_encoding[:1]]
-            # logger.info('####', np.array(boxes_imgs_encoding).shape)
-            # [cv2.imwrite(str(np.sum(boxes_encoding)) + '.png', Util.cut_frame_box(frame, box))
+            # logger.info("####", np.array(boxes_imgs_encoding).shape)
+            # [cv2.imwrite(str(np.sum(boxes_encoding)) + ".png", Util.cut_frame_box(frame, box))
             #  for boxes_encoding, box in zip(boxes_imgs_encoding, boxes)]
 
         box_track_ids = [
@@ -498,7 +499,7 @@ class CapDetectionTrack(threading.Thread):
         return boxes
 
     def save_release_resouce(self):
-        del self.detecton_freq_iter
+        del self.detection_freq_iter
         if self.is_save_stranger:
             [tracker.match_person.save() for tracker in self.tracks]
         del self.tracks
@@ -511,16 +512,16 @@ class DetectionTracksCtl(object):
         self.face_encoding = face_encoding
 
     def start_all(self, ipc_infos, camera_persons):
-        # ipc_infos:list.map.key=ipc_url/ipc_name,list.map.value='xx/xx.mp4'/test01
+        # ipc_infos:list.map.key=ipc_url/ipc_name,list.map.value="xx/xx.mp4"/test01
         threads = list()
 
         face_decector_lock = threading.Lock()
         face_encoding_lock = threading.Lock()
         for ipc_info in ipc_infos:
-            ipc_name = ipc_info['name']
-            is_realtime = ipc_info['realtime']
-            detecton_freq = ipc_info['detecton_freq']
-            thread = CapDetectionTrack(ipc_info, is_realtime, face_detector, face_encoding, detecton_freq,
+            ipc_name = ipc_info["name"]
+            is_realtime = ipc_info["realtime"]
+            detection_freq = ipc_info["detection_freq"]
+            thread = CapDetectionTrack(ipc_info, is_realtime, face_detector, face_encoding, detection_freq,
                                        camera_persons[ipc_name], face_decector_lock, face_encoding_lock)
             threads.append(thread)
         [thread.start() for thread in threads]
@@ -528,11 +529,11 @@ class DetectionTracksCtl(object):
         self.__after_all_stop()
 
     def __after_all_stop(self):
-        print('__after_all_stop')
-        # self.event_df['img_file'] = self.event_df['img_file'].apply(lambda x: "<img src='%s'>" % x)
-        # event_name_map = {0: '进', 1: '出'}
-        # self.event_df['event_name'] = self.event_df['event_name'].map(event_name_map)
-        # self.event_df.to_html('event.html')
+        print("__after_all_stop")
+        # self.event_df["img_file"] = self.event_df["img_file"].apply(lambda x: "<img src="%s">" % x)
+        # event_name_map = {0: "进", 1: "出"}
+        # self.event_df["event_name"] = self.event_df["event_name"].map(event_name_map)
+        # self.event_df.to_html("event.html")
 
     # todo 01 use diff change to decation detection ,02,use yield change param
     # ref Human-detection-and-Tracking
@@ -550,27 +551,45 @@ class DetectionTracksCtl(object):
         return temp
 
 
-camere_persons_files = Person.get_camera_person_files(PERSON_IMG_DIR)
-if __name__ == '__main__':
-    ipc_infos = [
-        {'name': 'test1', 'path': 'video/1.mp4', 'realtime': 0, 'detecton_freq': 20,
-         'save_stranger': 1}
-        ,
-        {'name': 'test2', 'path': 'video/2.mp4', 'realtime': 0, 'detecton_freq': 20,
-         'save_stranger': 0}
-    ]
+video_imgs = ""
+PERSON_IMG_DIR = ""
+if __name__ == "__main__":
+    import argparse
 
-    face_encoding = FaceFactory.get_encoding("DLIB_REG")
-    # persons = person_df.apply(lambda x: Person(face_encoding, x['imgs'].split(' ')), axis=1)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-c", "--config_path", help="the path of the config file(json format config)",
+                        default="config.json")
+    parser.add_argument("-fe", "--face_encoding", help="face encoding method")
+    parser.add_argument("-pimg", "--person_image_dir", help="person images save dir")
+    parser.add_argument("-vimg", "--video_image_dir", help="video images save dir")
+    args = parser.parse_args()
+    config_path = args.config_path
+
+    assert os.path.exists(config_path), "config file not exists"
+    config_json = json.load(open(config_path, "r"))
+    ipc_infos = config_json["ipcs"]
+
+    face_encoding_config = args.face_encoding or config_json.get("face_encoding", "DLIB_REG")
+    person_image_dir_config = args.person_image_dir or config_json.get("person_image_dir", "data/person_img/")
+    video_image_dir_config = args.video_image_dir or config_json.get("video_image_dir", "data/video_imgs/")
+    
+    os.path.exists(person_image_dir_config) or os.makedirs(person_image_dir_config)
+    os.path.exists(video_image_dir_config) or os.makedirs(video_image_dir_config)
+    
+    CapDetectionTrack.video_imgs = video_image_dir_config
+
+    face_encoding = FaceFactory.get_encoding(face_encoding_config)
     Person.face_encoding = face_encoding
-    Person.img_dir = PERSON_IMG_DIR
+    Person.img_dir = person_image_dir_config
 
     camera_persons = defaultdict(list)
+
+    camere_persons_files = Person.get_camera_person_files(person_image_dir_config)
     [camera_persons[camera_name].append(Person(person_name, person_files, camera_name))
      for camera_name, persons_map in camere_persons_files.items()
      for person_name, person_files in persons_map.items()]
 
-    # camera_persons = {'test1': persons, 'test6': persons}
-    face_detector = FaceFactory.get_detection('CV_CAS')
+    # camera_persons = {"test1": persons, "test6": persons}
+    face_detector = FaceFactory.get_detection("CV_CAS")
     detection_track = DetectionTracksCtl(face_detector, face_encoding)
     detection_track.start_all(ipc_infos, camera_persons=camera_persons)
