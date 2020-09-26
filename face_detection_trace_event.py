@@ -1,3 +1,4 @@
+import abc
 import json
 import os
 from collections import defaultdict
@@ -114,7 +115,19 @@ class Util(object):
         return filepath, shotname, extension
 
 
-class FaceDetectionFrFoc(object):
+class FaceDetection(metaclass=abc.ABCMeta):
+    @abc.abstractmethod
+    def detection(self, frame) -> List[Tuple[str, str, str, str]]:
+        """
+        图片中所有的人脸矩形框坐标
+
+        :param frame: 图片,h,w,s三维数组格式
+        :return: List[tuple],每个tuple都是(int,int,int,int)形式的opencv的矩形坐标
+        """
+        pass
+
+
+class FaceDetectionFrFoc(FaceDetection):
     @staticmethod
     def fl_to_cv_box(rect: Tuple[int, int, int, int]) -> Tuple[int, int, int, int]:
         """
@@ -132,21 +145,15 @@ class FaceDetectionFrFoc(object):
         h = bottom - top
         return x, y, w, h
 
-    @staticmethod
-    def detection(frame) -> List[Tuple[str, str, str, str]]:
-        """
-        图片中所有的人脸矩形框坐标
-
-        :param frame: 图片,h,w,s三维数组格式
-        :return: List[tuple],每个tuple都是(int,int,int,int)形式的opencv的矩形坐标
-        """
+    def detection(self, frame) -> List[Tuple[str, str, str, str]]:
         boxes = face_recognition.face_locations(frame)
         boxes = [FaceDetectionFrFoc.fl_to_cv_box(box) for box in boxes]
         return boxes
 
 
-class FaceDetectionDlibFro(object):
+class FaceDetectionDlibFro(FaceDetection):
     def __init__(self):
+        super(FaceDetectionDlibFro, self).__init__()
         self.face_detector = dlib.get_frontal_face_detector()
 
     @staticmethod
@@ -171,10 +178,11 @@ class FaceDetectionDlibFro(object):
         return boxes
 
 
-class FaceDetectionCvCas(object):
+class FaceDetectionCvCas(FaceDetection):
     cascade_xml = "model/haarcascade_frontalface_default.xml"
 
     def __init__(self):
+        super(FaceDetectionCvCas, self).__init__()
         self.face_detector = cv2.CascadeClassifier(FaceDetectionCvCas.cascade_xml)
 
     def detection(self, frame):
@@ -182,7 +190,21 @@ class FaceDetectionCvCas(object):
         return boxes
 
 
-class FaceEncodingFrFe(object):
+class FaceEncoding(metaclass=abc.ABCMeta):
+    @abc.abstractmethod
+    def encoding_frame_box(self, frame) -> List[Tuple[str, str, str, str]]:
+        pass
+
+    @abc.abstractmethod
+    def encoding(frame, box):
+        pass
+
+    @abc.abstractmethod
+    def encoding_img(img):
+        pass
+
+
+class FaceEncodingFrFe(FaceEncoding):
     @staticmethod
     def encoding_frame_box(frame_box):
         if frame_box.frame is not None and len(frame_box.frame) > 0 and frame_box.box is not None and len(
@@ -202,11 +224,10 @@ class FaceEncodingFrFe(object):
         return np.array(face_encodings[0]) if face_encodings else None
 
 
-class FaceEncodingDlibReg(object):
-    def __init__(self):
-        self.face_detector = dlib.get_frontal_face_detector()
-        self.shape = dlib.shape_predictor("model/shape_predictor_68_face_landmarks.dat")
-        self.face_encoding = dlib.face_recognition_model_v1("model/dlib_face_recognition_resnet_model_v1.dat")
+class FaceEncodingDlibReg(FaceEncoding):
+    face_detector = dlib.get_frontal_face_detector()
+    shape = dlib.shape_predictor("model/shape_predictor_68_face_landmarks.dat")
+    face_encoding = dlib.face_recognition_model_v1("model/dlib_face_recognition_resnet_model_v1.dat")
 
     @staticmethod
     def cv_box_to_dlib(box):
@@ -214,48 +235,48 @@ class FaceEncodingDlibReg(object):
         rectangle = dlib.rectangle(x, y, x + w, y + h)
         return rectangle
 
-    def encoding_frame_box(self, frame_box):
+    @staticmethod
+    def encoding_frame_box(frame_box):
         if frame_box.frame is not None and len(frame_box.frame) > 0 and frame_box.box is not None and len(
                 frame_box.box) > 0:
-            return self.encoding(frame_box.frame, frame_box.box)
-        return self.encoding_img(frame_box.img)
+            return FaceEncodingDlibReg.encoding(frame_box.frame, frame_box.box)
+        return FaceEncodingDlibReg.encoding_img(frame_box.img)
 
-    def encoding(self, frame, box):
+    @staticmethod
+    def encoding(frame, box):
         rectangle = FaceEncodingDlibReg.cv_box_to_dlib(box)
-        shape = self.shape(frame, rectangle)
-        face_descriptor = self.face_encoding.compute_face_descriptor(frame, shape)
+        shape = FaceEncodingDlibReg.shape(frame, rectangle)
+        face_descriptor = FaceEncodingDlibReg.face_encoding.compute_face_descriptor(frame, shape)
         return np.array(face_descriptor)
 
-    def encoding_img(self, img):
-        boxes = self.face_detector(img, 1)
+    @staticmethod
+    def encoding_img(img):
+        boxes = FaceEncodingDlibReg.face_detector(img, 1)
         if not boxes:
             return None
         box = boxes[0]
-        shape = self.shape(img, box)
-        face_descriptor = self.face_encoding.compute_face_descriptor(img, shape)
+        shape = FaceEncodingDlibReg.shape(img, box)
+        face_descriptor = FaceEncodingDlibReg.face_encoding.compute_face_descriptor(img, shape)
         return np.array(face_descriptor)
 
 
-class FaceFactory(object):
-    @staticmethod
-    def get_encoding(name):
-        if name == "FR_FE":
-            return FaceEncodingFrFe()
-        elif name == "DLIB_REG":
-            return FaceEncodingDlibReg()
-        else:
-            return None
+class FaceEncodingFactory(object):
+    face_encoding_construct = {"FR_FE": FaceEncodingFrFe,
+                               "DLIB_REG": FaceEncodingDlibReg}
 
     @staticmethod
-    def get_detection(name):
-        if name == "FR_FL":
-            return FaceDetectionFrFoc()
-        elif name == "CV_CAS":
-            return FaceDetectionCvCas()
-        elif name == "DLIB_FRO":
-            return FaceDetectionDlibFro()
-        else:
-            return None
+    def get_instance(encoding_method):
+        return FaceEncodingFactory.face_encoding_construct.get(encoding_method)()
+
+
+class FaceDetectionFactory(object):
+    face_detection_construct = {"FR_FL": FaceDetectionFrFoc,
+                                "CV_CAS": FaceDetectionCvCas,
+                                "DLIB_FRO": FaceDetectionDlibFro}
+
+    @staticmethod
+    def get_detection(detection_method):
+        return FaceDetectionFactory.face_detection_construct.get(detection_method)()
 
 
 class FrameBox(object):
@@ -352,11 +373,6 @@ class Person(object):
             if os.path.isdir(cameras_dir + camera_dir):
                 camera_person_dict[camera_dir] = Util.get_dirs_files(cameras_dir + "/" + camera_dir + "/")
         return camera_person_dict
-
-
-# img_items,[(file_name,img_frame)]
-# todo
-
 
 class Track(object):
     __id = 0
@@ -655,7 +671,7 @@ if __name__ == "__main__":
 
     CapDetectionTrack.video_imgs = video_image_dir_config
 
-    face_encoding = FaceFactory.get_encoding(face_encoding_config)
+    face_encoding = FaceEncodingFactory.get_instance(face_encoding_config)
     Person.face_encoding = face_encoding
     Person.img_dir = person_image_dir_config
 
@@ -667,6 +683,6 @@ if __name__ == "__main__":
      for person_name, person_files in persons_map.items()]
 
     # camera_persons = {"test1": persons, "test6": persons}
-    face_detector = FaceFactory.get_detection("CV_CAS")
+    face_detector = FaceDetectionFactory.get_detection("CV_CAS")
     detection_track = DetectionTracksCtl(face_detector, face_encoding)
     detection_track.start_all(ipc_infos, camera_persons=camera_persons)
