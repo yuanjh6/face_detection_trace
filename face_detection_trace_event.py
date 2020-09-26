@@ -421,7 +421,7 @@ class Person(object):
             self.frames_box_limit = LimitList(new_face_frame_max)
             self.__encodings = []
 
-        logger.info("new persion %s" % (str([np.sum(encoding) for encoding in self.encodings_valid()])))
+        logger.info("add new persion %s" % (str([np.sum(encoding) for encoding in self.encodings_valid()])))
 
     def new_frame_box(self, frame_box):
         """
@@ -452,7 +452,7 @@ class Person(object):
         return Person(Person.get_unknow_name(), list(), ipc_name=ipc_name, is_new=True)
 
     @staticmethod
-    def get_unknow_name()->str:
+    def get_unknow_name() -> str:
         """
         生成陌生人名字
 
@@ -573,7 +573,7 @@ class Track(object):
         person_dist = [min(face_recognition.face_distance(person.encodings_valid(), self.encoding), default=1.0) for
                        person in
                        persons]
-        logger.info("find_person self.encodings %s " % (str(np.sum(self.encoding))))
+        logger.info("match_person self.encodings %s " % (str(np.sum(self.encoding))))
         if min(person_dist, default=1.0) < tolerance:
             min_dist_index = np.argmin(person_dist)
             self.match_person = persons[min_dist_index]
@@ -755,10 +755,10 @@ class CapDetectionTrack(threading.Thread):
         """
         # type=0 enter, 1 out
         cv2.imwrite("%snew_face_%s.png" % (CapDetectionTrack.video_imgs, track_id), img)
-        logger.info(",".join((ipc_name, str(type),
-                              datetime.now().strftime("%Y%m%d%H%M%S"), str(track_id),
-                              "%snew_face_%s.png" % (CapDetectionTrack.video_imgs, track_id), str(box),
-                              person_name)))
+        logger.info("lost person" + ",".join((ipc_name, str(type),
+                                              datetime.now().strftime("%Y%m%d%H%M%S"), str(track_id),
+                                              "%snew_face_%s.png" % (CapDetectionTrack.video_imgs, track_id), str(box),
+                                              person_name)))
 
     def __face_upgrade_track(self, img, boxes):
         """
@@ -772,7 +772,8 @@ class CapDetectionTrack(threading.Thread):
         :param boxes: 图片帧中的人脸位置信息
         """
         tracks_map = {track.id: track for track in self.tracks}
-        track_ids, track_encodings = list(map(lambda x: x.id, self.tracks)), list(map(lambda x: x.encoding, self.tracks))
+        track_ids, track_encodings = list(map(lambda x: x.id, self.tracks)), list(
+            map(lambda x: x.encoding, self.tracks))
         boxes_imgs_encoding = list()
         if boxes is not None and len(boxes):
             with self.face_encoding_lock:
@@ -836,6 +837,7 @@ class DetectionTracksCtl(object):
     :cvar object face_detector:人脸识别器
     :cvar object face_encoding:人脸编码器
     """
+
     def __init__(self, face_detector, face_encoding):
         self.face_detector = face_detector
         self.face_encoding = face_encoding
@@ -903,6 +905,7 @@ if __name__ == "__main__":
     parser.add_argument("-c", "--config_path", help="the path of the config file(json format config)",
                         default="config.json")
     parser.add_argument("-fe", "--face_encoding", help="face encoding method")
+    parser.add_argument("-fd", "--face_detection", help="face detection method")
     parser.add_argument("-pimg", "--person_image_dir", help="person images save dir")
     parser.add_argument("-vimg", "--video_image_dir", help="video images save dir")
     args = parser.parse_args()
@@ -913,6 +916,7 @@ if __name__ == "__main__":
     ipc_infos = config_json["ipcs"]
 
     face_encoding_config = args.face_encoding or config_json.get("face_encoding", "DLIB_REG")
+    face_detection_config = args.face_detection or config_json.get("face_detection", "CV_CAS")
     person_image_dir_config = args.person_image_dir or config_json.get("person_image_dir", "data/person_img/")
     video_image_dir_config = args.video_image_dir or config_json.get("video_image_dir", "data/video_imgs/")
 
@@ -927,12 +931,13 @@ if __name__ == "__main__":
 
     camera_persons = defaultdict(list)
 
+    # 加载摄像头和对应人员以及人员人脸头像信息
     camere_persons_files = Person.get_camera_person_files(person_image_dir_config)
     [camera_persons[camera_name].append(Person(person_name, person_files, camera_name))
      for camera_name, persons_map in camere_persons_files.items()
      for person_name, person_files in persons_map.items()]
 
     # camera_persons = {"test1": persons, "test6": persons}
-    face_detector = FaceDetectionFactory.get_detection("CV_CAS")
+    face_detector = FaceDetectionFactory.get_detection(face_detection_config)
     detection_track = DetectionTracksCtl(face_detector, face_encoding)
     detection_track.start_all(ipc_infos, camera_persons=camera_persons)

@@ -16,6 +16,7 @@
     }
   ],
   "face_encoding": "DLIB_REG",
+  "face_detection": "CV_CAS",
   "person_image_dir": "data/person_img/",
   "video_image_dir": "data/video_imgs/"
 }
