@@ -182,7 +182,7 @@ class FaceDetectionDlibFro(FaceDetection):
 
 
 class FaceDetectionCvCas(FaceDetection):
-    cascade_xml = "model/haarcascade_frontalface_default.xml"
+    cascade_xml = "../model/haarcascade_frontalface_default.xml"
     face_detector = cv2.CascadeClassifier(cascade_xml)
 
     def detection(self, frame):
@@ -249,8 +249,8 @@ class FaceEncodingFrFe(FaceEncoding):
 
 class FaceEncodingDlibReg(FaceEncoding):
     face_detector = dlib.get_frontal_face_detector()
-    shape = dlib.shape_predictor("model/shape_predictor_68_face_landmarks.dat")
-    face_encoding = dlib.face_recognition_model_v1("model/dlib_face_recognition_resnet_model_v1.dat")
+    shape = dlib.shape_predictor("../model/shape_predictor_68_face_landmarks.dat")
+    face_encoding = dlib.face_recognition_model_v1("../model/dlib_face_recognition_resnet_model_v1.dat")
 
     @staticmethod
     def cv_box_to_dlib(box):
@@ -400,9 +400,9 @@ class Person(object):
 
     :cvar str ipc_name: 摄像头名称
     :cvar bool is_new: 是否是新人
-    :cvar str person_name:人员姓名
-    :cvar list frames_box_limit:如果是新人,建立list,保存新人头像
-    :cvar List __encodings:frames_box_limit里头像对应的头像特征码信息
+    :cvar str person_name: 人员姓名
+    :cvar list frames_box_limit: 如果是新人,建立list,保存新人头像
+    :cvar List __encodings: frames_box_limit里头像对应的头像特征码信息
     """
     __unknow_max_id = 0
     face_encoding = None
@@ -496,14 +496,14 @@ class Track(object):
     内部包含了opencv追踪器,或者说对opencv追踪器的二次封装
 
     :cvar str ipc_name: 摄像头名称
-    :cvar int __id:跟踪器id
-    :cvar object tracker:跟踪器,opencv追踪器实例
-    :cvar list face_img:图片里的头像小图信息
-    :cvar list img:图片
-    :cvar list encoding:人脸头像对应特征码
-    :cvar list __history:临近的各帧是否包含此人
-    :cvar object match_person:跟踪器匹配的人
-    :cvar callable event_call_back:追踪的人消失之后的回调函数,比如生成事件日志
+    :cvar int __id: 跟踪器id
+    :cvar object tracker: 跟踪器,opencv追踪器实例
+    :cvar list face_img: 图片里的头像小图信息
+    :cvar list img: 图片
+    :cvar list encoding: 人脸头像对应特征码
+    :cvar list __history: 临近的各帧是否包含此人
+    :cvar object match_person: 跟踪器匹配的人
+    :cvar callable event_call_back: 追踪的人消失之后的回调函数,比如生成事件日志
     """
     __id = 0
 
@@ -603,15 +603,15 @@ class CapDetectionTrack(threading.Thread):
 
     集成人脸检测和追踪
 
-    :cvar bool is_start:是否已经开启
-    :cvar object face_detector:人脸检测器
-    :cvar object face_encoding:人脸编码器
-    :cvar object __last_frame:视频流的最新帧
-    :cvar queue frame_queue:视频流的视频帧队列
-    :cvar bool is_realtime:是否是实时模式
-    :cvar list tracks:追踪器列表,一个视频会出现多个人,自然也有多个追踪器
-    :cvar list ipc_info:视频源配置信息
-    :cvar list persons:已保存的人员和对应的人脸信息
+    :cvar bool is_start: 是否已经开启
+    :cvar object face_detector: 人脸检测器
+    :cvar object face_encoding: 人脸编码器
+    :cvar object __last_frame: 视频流的最新帧
+    :cvar queue frame_queue: 视频流的视频帧队列
+    :cvar bool is_realtime: 是否是实时模式
+    :cvar list tracks: 追踪器列表,一个视频会出现多个人,自然也有多个追踪器
+    :cvar list ipc_info: 视频源配置信息
+    :cvar list persons: 已保存的人员和对应的人脸信息
     """
     video_imgs = None
 
@@ -835,8 +835,8 @@ class DetectionTracksCtl(object):
     """
     人脸检测,识别控制器
 
-    :cvar object face_detector:人脸识别器
-    :cvar object face_encoding:人脸编码器
+    :cvar object face_detector: 人脸识别器
+    :cvar object face_encoding: 人脸编码器
     """
 
     def __init__(self, face_detector, face_encoding):
@@ -918,8 +918,8 @@ if __name__ == "__main__":
 
     face_encoding_config = args.face_encoding or config_json.get("face_encoding", "DLIB_REG")
     face_detection_config = args.face_detection or config_json.get("face_detection", "CV_CAS")
-    person_image_dir_config = args.person_image_dir or config_json.get("person_image_dir", "data/person_img/")
-    video_image_dir_config = args.video_image_dir or config_json.get("video_image_dir", "data/video_imgs/")
+    person_image_dir_config = args.person_image_dir or config_json.get("person_image_dir", "../data/person_img/")
+    video_image_dir_config = args.video_image_dir or config_json.get("video_image_dir", "../data/video_imgs/")
 
     os.path.exists(person_image_dir_config) or os.makedirs(person_image_dir_config)
     os.path.exists(video_image_dir_config) or os.makedirs(video_image_dir_config)
