@@ -10,7 +10,10 @@ Welcome to face_detection_trace's documentation!
    :maxdepth: 2
    :caption: Contents:
 
-   face_detection_trace
+   src/face_detection_trace
+   src/face_detection
+   src/face_encoding
+   src/util
 
 
 Indices and tables

@@ -116,5 +116,3 @@ class FaceEncodingFactory(object):
         :return: 特征码提取方法实例
         """
         return FaceEncodingFactory.face_encoding_construct.get(encoding_method)()
-
-

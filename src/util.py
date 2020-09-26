@@ -3,6 +3,7 @@ from collections import defaultdict
 from typing import Tuple, Dict, List
 import cv2
 
+
 class Util(object):
     """
     工具类
