@@ -24,7 +24,7 @@ import numpy as np
 optional arguments:
   -c CONFIG_PATH, --config_path :配置文件路径
   -fe FACE_ENCODING, --face_encoding :人脸特征值提取算法
-  -pimg PERSON_IMAGE_DIR, --person_image_dir :人脸头像图片保存路径
+  -pimg PERSON_IMAGE_DIR, --person_image_dir :人脸图片保存路径
   -vimg VIDEO_IMAGE_DIR, --video_image_dir :视频图片保存路径
 
 使用示例:python face_detection_trace_event.py -c config.json 
@@ -75,6 +75,7 @@ class Util(object):
     def cut_frame_box(frame, box: Tuple[int, int, int, int]):
         """
         从图片中截取出矩形区域
+
         :param frame: 图片,h,w,s格式的3维数组
         :param box: 矩形框
         :return: 矩形框内的图片,h,w,s格式的3维数组
