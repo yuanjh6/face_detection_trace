@@ -394,6 +394,15 @@ class LimitList(object):
 
 
 class Person(object):
+    """
+    人员,可能是员工或者陌生人
+
+    :cvar str ipc_name: 摄像头名称
+    :cvar bool is_new: 是否是新人
+    :cvar str person_name:人员姓名
+    :cvar list frames_box_limit:如果是新人,建立list,保存新人头像
+    :cvar List __encodings:frames_box_limit里头像对应的头像特征码信息
+    """
     __unknow_max_id = 0
     face_encoding = None
     img_dir = ""
@@ -415,33 +424,62 @@ class Person(object):
         logger.info("new persion %s" % (str([np.sum(encoding) for encoding in self.encodings_valid()])))
 
     def new_frame_box(self, frame_box):
+        """
+        向frames_box_limit中新增frame_box信息
+
+        :param frame_box: FrameFox信息,包含图片和图片里头像位置信息
+        """
         if self.is_new:
             self.frames_box_limit.append(frame_box) and self.__encodings.append(
                 Person.face_encoding.encoding_frame_box(frame_box))
 
     def encodings_valid(self):
+        """
+        返回有效的encoding信息
+
+        :return: encoding中有效的头像编码
+        """
         return [x for x in self.__encodings if x is not None and len(x)]
 
     @staticmethod
     def new_unknow_person(ipc_name):
+        """
+        新增陌生人
+
+        :param ipc_name:摄像头名称
+        :return:陌生人person实例
+        """
         return Person(Person.get_unknow_name(), list(), ipc_name=ipc_name, is_new=True)
 
     @staticmethod
-    def get_unknow_name():
+    def get_unknow_name()->str:
+        """
+        生成陌生人名字
+
+        :return: 陌生人名字
+        """
         Person.__unknow_max_id += 1
         return "unknow{0:03d}".format(Person.__unknow_max_id)
 
     def save(self):
+        """
+        保存frames_box_limit中的图片和头像位置信息
+        """
         if self.is_new:
             dir_path = Person.img_dir + self.ipc_name + "/" + self.person_name + "/"
-            if not os.path.exists(dir_path):
-                os.makedirs(dir_path)
+            os.path.exists(dir_path) or os.makedirs(dir_path)
             for frame_box in self.frames_box_limit:
                 cv2.imwrite(dir_path + frame_box.name, frame_box.img)
             self.is_new = False
 
     @staticmethod
     def get_camera_person_files(cameras_dir):
+        """
+        加载某个摄像头下某人的所有头像图片信息
+
+        :param cameras_dir: 图片目录
+        :return: dict,key:camera_name,摄像头名称,value:dict02,dict02:key:person_name,姓名,value:img_list,此人对应头像列表
+        """
         assert os.path.exists(cameras_dir) and os.path.isdir(cameras_dir), "dir is illegal"
         camera_person_dict = defaultdict(dict)
         for camera_dir in os.listdir(cameras_dir):
@@ -451,14 +489,29 @@ class Person(object):
 
 
 class Track(object):
+    """
+    跟踪器
+
+    内部包含了opencv追踪器,或者说对opencv追踪器的二次封装
+
+    :cvar str ipc_name: 摄像头名称
+    :cvar int __id:跟踪器id
+    :cvar object tracker:跟踪器,opencv追踪器实例
+    :cvar list face_img:图片里的头像小图信息
+    :cvar list img:图片
+    :cvar list encoding:人脸头像对应特征码
+    :cvar list __history:临近的各帧是否包含此人
+    :cvar object match_person:跟踪器匹配的人
+    :cvar callable event_call_back:追踪的人消失之后的回调函数,比如生成事件日志
+    """
     __id = 0
 
-    def __init__(self, ipc_name, tracker, frame, box, encoding, persons, event_call_back, history=5):
+    def __init__(self, ipc_name, tracker, img, box, encoding, persons, event_call_back, history=5):
         self.ipc_name = ipc_name
         self.__id = Track.__id = Track.__id + 1
         self.tracker = tracker
-        self.img = frame[(box[1]):(box[1] + box[3]), (box[0]):(box[0] + box[2])]
-        self.frame = frame
+        self.face_img = img[(box[1]):(box[1] + box[3]), (box[0]):(box[0] + box[2])]
+        self.img = img
         self.encoding = encoding
         self.__history = [False] * history
         self.__history_iter = itertools.cycle(range(history))
@@ -466,29 +519,55 @@ class Track(object):
         # 暂不用self.__history_have=bool
         self.__history[next(self.__history_iter)] = True
 
-        self.__init_tracker(frame, box)
+        self.__init_tracker(img, box)
 
         self.find_person(persons)
         self.event_call_back = event_call_back
-        self.event_call_back(0, self.ipc_name, self.__id, self.img, box, self.match_person.person_name)
+        self.event_call_back(0, self.ipc_name, self.__id, self.face_img, box, self.match_person.person_name)
 
-    def __init_tracker(self, frame, box):
-        self.tracker.init(frame, tuple(box))
+    def __init_tracker(self, img, box):
+        """
+        使用图片和图片里的头像位置,初始化内置的opencv追踪器
 
-    def update_img(self, frame, box, encoding):
-        self.img = frame[box[1]:box[1] + box[3], box[0]:box[0] + box[2]]
-        self.match_person.new_frame_box(FrameBox(frame, box))
+        :param img: 图片
+        :param box: 头像位置
+        """
+        self.tracker.init(img, tuple(box))
+
+    def update_img(self, img, box, encoding):
+        """
+        更新追踪器信息
+
+        :param img:图片
+        :param box:人脸位置
+        :param encoding:人脸特征编码
+        """
+        self.face_img = img[box[1]:box[1] + box[3], box[0]:box[0] + box[2]]
+        self.match_person.new_frame_box(FrameBox(img, box))
         self.encoding = encoding
-        self.frame = frame
+        self.img = img
         iter_num = next(self.__history_iter)
         if self.alive() and self.__history[iter_num] == 1 and sum(self.__history) == 1:
-            self.event_call_back(1, self.ipc_name, self.id, self.frame, box, self.match_person.person_name)
+            self.event_call_back(1, self.ipc_name, self.id, self.img, box, self.match_person.person_name)
             self.__history[iter_num] = False
 
-    def update(self, frame):
-        return self.tracker.update(frame)
+    def update(self, img):
+        """
+        更新追踪器图片
+
+        :param img: 图片
+        :return:
+        """
+        return self.tracker.update(img)
 
     def find_person(self, persons, tolerance=0.6):
+        """
+        从入参的persons中匹配track追踪器追踪的人(将track和person关联起来)
+
+        :param persons:所有人员列表
+        :param tolerance:人员匹配阈值,如果人员距离小于此阈值则认为是同一个人
+        :return:
+        """
         if self.encoding is None or len(self.encoding) == 0:
             return
         person_dist = [min(face_recognition.face_distance(person.encodings_valid(), self.encoding), default=1.0) for
@@ -503,6 +582,13 @@ class Track(object):
             persons.append(self.match_person)
 
     def alive(self):
+        """
+        追踪器是否处于活跃活跃状态
+
+        追踪器匹配的人最近几帧是否出现过
+
+        :return:
+        """
         return sum(self.__history) > 0
 
     @property
@@ -511,6 +597,21 @@ class Track(object):
 
 
 class CapDetectionTrack(threading.Thread):
+    """
+    检测追踪类
+
+    集成人脸检测和追踪
+
+    :cvar bool is_start:是否已经开启
+    :cvar object face_detector:人脸检测器
+    :cvar object face_encoding:人脸编码器
+    :cvar object __last_frame:视频流的最新帧
+    :cvar queue frame_queue:视频流的视频帧队列
+    :cvar bool is_realtime:是否是实时模式
+    :cvar list tracks:追踪器列表,一个视频会出现多个人,自然也有多个追踪器
+    :cvar list ipc_info:视频源配置信息
+    :cvar list persons:已保存的人员和对应的人脸信息
+    """
     video_imgs = None
 
     def __init__(self, ipc_info, is_realtime, face_detector, face_encoding, detection_freq, persons, face_decector_lock,
@@ -546,6 +647,10 @@ class CapDetectionTrack(threading.Thread):
         return bool(self.ipc_info.get("save_stranger", 0))
 
     def run(self):
+        """
+        启动视频解码,人脸检测和人脸特征码提取线程
+
+        """
         self.is_start = True
 
         cv_cap = cv2.VideoCapture(self.path)
@@ -569,6 +674,11 @@ class CapDetectionTrack(threading.Thread):
         self.save_release_resouce()
 
     def __start_capture(self, cv_cap):
+        """
+        启动视频解码线程
+
+        :param cv_cap: 视频解码器
+        """
         if self.is_realtime:
             while self.is_start:
                 ret, frame = cv_cap.read()
@@ -590,11 +700,21 @@ class CapDetectionTrack(threading.Thread):
         cv_cap.release()
 
     def __get_last_frame(self):
+        """
+        返回视频流最新帧
+
+        :return:
+        """
         ret = self.__last_frame if self.is_realtime else self.frame_queue.get()
         self.__last_frame = None
         return ret
 
     def __start_detection_trace(self, video_write):
+        """
+        启动视频的人脸检测和追踪线程
+
+        :param video_write: 处理后的视频写入文件
+        """
         while self.is_start:
             last_frame = self.__get_last_frame()
             if last_frame is None:
@@ -609,29 +729,54 @@ class CapDetectionTrack(threading.Thread):
             # cv2.waitKey(1)
         video_write.release()
 
-    def __face_dec(self, frame):
+    def __face_dec(self, img):
+        """
+        更新人脸检测图片帧信息
+
+        :param img: 图片帧
+        :return:
+        """
         with self.face_detector_lock:
-            boxes = self.face_detector.detection(frame)
-        self.__face_upgrade_track(frame, boxes)
+            boxes = self.face_detector.detection(img)
+        self.__face_upgrade_track(img, boxes)
         return boxes
 
     @staticmethod
-    def event_call_back(type, ipc_name, track_id, frame=None, box=None, person_name=None):
+    def event_call_back(type, ipc_name, track_id, img=None, box=None, person_name=None):
+        """
+        追踪的人消失后的回调函数
+
+        :param type: 事件类型
+        :param ipc_name: 摄像头名称
+        :param track_id: 追踪器id
+        :param img: 图片帧
+        :param box: 图片帧中的人脸位置
+        :param person_name: 人名
+        """
         # type=0 enter, 1 out
-        cv2.imwrite("%snew_face_%s.png" % (CapDetectionTrack.video_imgs, track_id), frame)
+        cv2.imwrite("%snew_face_%s.png" % (CapDetectionTrack.video_imgs, track_id), img)
         logger.info(",".join((ipc_name, str(type),
                               datetime.now().strftime("%Y%m%d%H%M%S"), str(track_id),
                               "%snew_face_%s.png" % (CapDetectionTrack.video_imgs, track_id), str(box),
                               person_name)))
 
-    def __face_upgrade_track(self, frame, boxes):
+    def __face_upgrade_track(self, img, boxes):
+        """
+        用图片帧更新追踪器
+
+        图片中可能存在多张人脸
+        如果人脸和已有track中的某人脸匹配,则用此frame更新已有track
+        如果人脸无法和已有track中的人脸匹配,新建立track
+
+        :param img: 图片帧
+        :param boxes: 图片帧中的人脸位置信息
+        """
         tracks_map = {track.id: track for track in self.tracks}
-        track_ids, track_encodings = list(map(lambda x: x.id, self.tracks)), list(
-            map(lambda x: x.encoding, self.tracks))
+        track_ids, track_encodings = list(map(lambda x: x.id, self.tracks)), list(map(lambda x: x.encoding, self.tracks))
         boxes_imgs_encoding = list()
         if boxes is not None and len(boxes):
             with self.face_encoding_lock:
-                boxes_imgs_encoding = [self.face_encoding.encoding(frame, box) for box in boxes]
+                boxes_imgs_encoding = [self.face_encoding.encoding(img, box) for box in boxes]
             boxes_encoding_filter = [boxes_img_encoding is not None and len(boxes_img_encoding) > 0 for
                                      boxes_img_encoding in boxes_imgs_encoding]
             boxes = np.array(boxes)[boxes_encoding_filter]
@@ -652,9 +797,9 @@ class CapDetectionTrack(threading.Thread):
         new_trackers = []
         for box_track_id, boxes_img, boxes_img_encoding in zip(box_track_ids, boxes, boxes_imgs_encoding):
             if len(box_track_id) > 0:
-                tracks_map[box_track_id[0]].update_img(frame, boxes_img, boxes_img_encoding)
+                tracks_map[box_track_id[0]].update_img(img, boxes_img, boxes_img_encoding)
             else:
-                new_trackers.append(Track(self.name, cv2.TrackerKCF_create(), frame, boxes_img, boxes_img_encoding,
+                new_trackers.append(Track(self.name, cv2.TrackerKCF_create(), img, boxes_img, boxes_img_encoding,
                                           self.persons, event_call_back=self.event_call_back))
 
         # keep alive tracks only
@@ -663,11 +808,20 @@ class CapDetectionTrack(threading.Thread):
         self.tracks = [tracker for tracker in self.tracks if tracker.alive()]
         self.tracks.extend(new_trackers)
 
-    def __face_track(self, frame):
-        boxes = [list(map(int, track.update(frame)[1])) for track in self.tracks]
+    def __face_track(self, img):
+        """
+        使用frame更新已有人脸追踪器track
+
+        :param img: 图片帧
+        :return:
+        """
+        boxes = [list(map(int, track.update(img)[1])) for track in self.tracks]
         return boxes
 
     def save_release_resouce(self):
+        """
+        资源保存和释放,保存追踪器里关联的陌生人的人脸图片
+        """
         del self.detection_freq_iter
         if self.is_save_stranger:
             [tracker.match_person.save() for tracker in self.tracks]
@@ -676,11 +830,23 @@ class CapDetectionTrack(threading.Thread):
 
 
 class DetectionTracksCtl(object):
+    """
+    人脸检测,识别控制器
+
+    :cvar object face_detector:人脸识别器
+    :cvar object face_encoding:人脸编码器
+    """
     def __init__(self, face_detector, face_encoding):
         self.face_detector = face_detector
         self.face_encoding = face_encoding
 
     def start_all(self, ipc_infos, camera_persons):
+        """
+        启动所有视频流的人脸检测线程
+
+        :param ipc_infos: 视频流配置信息
+        :param camera_persons: 各视频流对应对应人员信息
+        """
         # ipc_infos:list.map.key=ipc_url/ipc_name,list.map.value="xx/xx.mp4"/test01
         threads = list()
 
@@ -708,6 +874,16 @@ class DetectionTracksCtl(object):
     # ref Human-detection-and-Tracking
     @staticmethod
     def background_subtraction(previous_frame, frame_resized_grayscale, min_area):
+        """
+        通过视频帧变化比率,判断是否需要启动检测线程
+
+        如果视频帧不发生变化,说明没有人出现,不需要进行人脸检测和追踪识别
+
+        :param previous_frame: 上一帧图片信息
+        :param frame_resized_grayscale:
+        :param min_area: 最小变化区域阈值
+        :return: 图片变化率
+        """
         frameDelta = cv2.absdiff(previous_frame, frame_resized_grayscale)
         thresh = cv2.threshold(frameDelta, 25, 255, cv2.THRESH_BINARY)[1]
         thresh = cv2.dilate(thresh, None, iterations=2)
@@ -720,8 +896,6 @@ class DetectionTracksCtl(object):
         return temp
 
 
-video_imgs = ""
-PERSON_IMG_DIR = ""
 if __name__ == "__main__":
     import argparse
 
