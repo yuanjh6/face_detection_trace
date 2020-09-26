@@ -1,3 +1,4 @@
 opencv-python
+cmake
 face_recognition
 dlib
