@@ -116,6 +116,10 @@ class Util(object):
 
 
 class FaceDetection(metaclass=abc.ABCMeta):
+    """
+    人脸检测FaceDetection抽象类
+    """
+
     @abc.abstractmethod
     def detection(self, frame) -> List[Tuple[str, str, str, str]]:
         """
@@ -152,9 +156,7 @@ class FaceDetectionFrFoc(FaceDetection):
 
 
 class FaceDetectionDlibFro(FaceDetection):
-    def __init__(self):
-        super(FaceDetectionDlibFro, self).__init__()
-        self.face_detector = dlib.get_frontal_face_detector()
+    face_detector = dlib.get_frontal_face_detector()
 
     @staticmethod
     def dlib_box_to_cv(rectangle: Tuple[int, int, int, int]) -> Tuple[int, int, int, int]:
@@ -170,7 +172,7 @@ class FaceDetectionDlibFro(FaceDetection):
         return x, y, w, h
 
     def detection(self, frame):
-        rectangles = self.face_detector(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), 1)
+        rectangles = FaceDetectionDlibFro.face_detector(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), 1)
         if not rectangles:
             return list()
         else:
@@ -180,47 +182,67 @@ class FaceDetectionDlibFro(FaceDetection):
 
 class FaceDetectionCvCas(FaceDetection):
     cascade_xml = "model/haarcascade_frontalface_default.xml"
-
-    def __init__(self):
-        super(FaceDetectionCvCas, self).__init__()
-        self.face_detector = cv2.CascadeClassifier(FaceDetectionCvCas.cascade_xml)
+    face_detector = cv2.CascadeClassifier(cascade_xml)
 
     def detection(self, frame):
-        boxes = self.face_detector.detectMultiScale(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), 1.15, 5)
+        boxes = FaceDetectionCvCas.face_detector.detectMultiScale(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), 1.15, 5)
         return boxes
 
 
 class FaceEncoding(metaclass=abc.ABCMeta):
+    """
+    人脸特征值提取face encoding抽象类
+    """
+
+    @staticmethod
     @abc.abstractmethod
-    def encoding_frame_box(self, frame) -> List[Tuple[str, str, str, str]]:
+    def encoding_frame_box(frame_box) -> List[Tuple[str, str, str, str]]:
+        """
+        获取frame_box中头像和对应box位置的特征码
+
+        :param frame_box: frame_box,包含了图片和box信息
+        """
         pass
 
+    @staticmethod
     @abc.abstractmethod
-    def encoding(frame, box):
+    def encoding(img, box):
+        """
+        获取图片中头像的特征码
+
+        :param img: 图片,h,w,s三维信息
+        :param box: 头像坐标
+        """
         pass
 
+    @staticmethod
     @abc.abstractmethod
-    def encoding_img(img):
+    def encoding_img(face_img):
+        """
+        获取图片中第一个头像的特征码(言外之意,图片本来就是头像图片)
+
+        :param face_img: 图片,h,w,s三维信息
+        """
         pass
 
 
 class FaceEncodingFrFe(FaceEncoding):
     @staticmethod
     def encoding_frame_box(frame_box):
-        if frame_box.frame is not None and len(frame_box.frame) > 0 and frame_box.box is not None and len(
+        if frame_box.img is not None and len(frame_box.img) > 0 and frame_box.box is not None and len(
                 frame_box.box) > 0:
-            return FaceEncodingFrFe.encoding(frame_box.frame, frame_box.box)
+            return FaceEncodingFrFe.encoding(frame_box.img, frame_box.box)
         return FaceEncodingFrFe.encoding_img(frame_box.img)
 
     @staticmethod
-    def encoding(frame, box):
+    def encoding(img, box):
         fl_box = Util.cv_to_fl_box(box)
-        face_encodings = face_recognition.face_encodings(frame, [fl_box])
+        face_encodings = face_recognition.face_encodings(img, [fl_box])
         return np.array(face_encodings[0]) if face_encodings else None
 
     @staticmethod
-    def encoding_img(img):
-        face_encodings = face_recognition.face_encodings(img)
+    def encoding_img(face_img):
+        face_encodings = face_recognition.face_encodings(face_img)
         return np.array(face_encodings[0]) if face_encodings else None
 
 
@@ -237,72 +259,120 @@ class FaceEncodingDlibReg(FaceEncoding):
 
     @staticmethod
     def encoding_frame_box(frame_box):
-        if frame_box.frame is not None and len(frame_box.frame) > 0 and frame_box.box is not None and len(
+        if frame_box.img is not None and len(frame_box.img) > 0 and frame_box.box is not None and len(
                 frame_box.box) > 0:
-            return FaceEncodingDlibReg.encoding(frame_box.frame, frame_box.box)
+            return FaceEncodingDlibReg.encoding(frame_box.img, frame_box.box)
         return FaceEncodingDlibReg.encoding_img(frame_box.img)
 
     @staticmethod
-    def encoding(frame, box):
+    def encoding(img, box):
         rectangle = FaceEncodingDlibReg.cv_box_to_dlib(box)
-        shape = FaceEncodingDlibReg.shape(frame, rectangle)
-        face_descriptor = FaceEncodingDlibReg.face_encoding.compute_face_descriptor(frame, shape)
+        shape = FaceEncodingDlibReg.shape(img, rectangle)
+        face_descriptor = FaceEncodingDlibReg.face_encoding.compute_face_descriptor(img, shape)
         return np.array(face_descriptor)
 
     @staticmethod
-    def encoding_img(img):
-        boxes = FaceEncodingDlibReg.face_detector(img, 1)
+    def encoding_img(face_img):
+        boxes = FaceEncodingDlibReg.face_detector(face_img, 1)
         if not boxes:
             return None
         box = boxes[0]
-        shape = FaceEncodingDlibReg.shape(img, box)
-        face_descriptor = FaceEncodingDlibReg.face_encoding.compute_face_descriptor(img, shape)
+        shape = FaceEncodingDlibReg.shape(face_img, box)
+        face_descriptor = FaceEncodingDlibReg.face_encoding.compute_face_descriptor(face_img, shape)
         return np.array(face_descriptor)
 
 
 class FaceEncodingFactory(object):
+    """
+    face encoding 的工厂类
+    """
     face_encoding_construct = {"FR_FE": FaceEncodingFrFe,
                                "DLIB_REG": FaceEncodingDlibReg}
 
     @staticmethod
     def get_instance(encoding_method):
+        """
+        获取encoding_method对应的encoding实例
+
+        :param encoding_method: 人脸特征码提取方法
+        :return: 特征码提取方法实例
+        """
         return FaceEncodingFactory.face_encoding_construct.get(encoding_method)()
 
 
 class FaceDetectionFactory(object):
+    """
+    face detection 的工厂类
+    """
     face_detection_construct = {"FR_FL": FaceDetectionFrFoc,
                                 "CV_CAS": FaceDetectionCvCas,
                                 "DLIB_FRO": FaceDetectionDlibFro}
 
     @staticmethod
     def get_detection(detection_method):
+        """
+        获取detection_method对应的detection实例
+
+        :param detection_method: 人脸检测方法
+        :return: 检测方法实例
+        """
         return FaceDetectionFactory.face_detection_construct.get(detection_method)()
 
 
 class FrameBox(object):
-    def __init__(self, frame=None, box=None):
-        assert (frame is not None and box is not None), "bad param"
-        self.frame = frame
+    """
+    自定义对象,包含图片帧和头像位置信息
+
+    :cvar list img: 图片,hws三维数组格式
+    :cvar tuple box: 头像位置,长度为4的list
+    """
+
+    def __init__(self, img=None, box=None):
+        assert (img is not None and box is not None), "bad param"
+        self.img = img
         self.box = list(map(int, box))
 
     @property
-    def name(self):
+    def name(self) -> str:
+        """
+        使用box的头像坐标生成图片文件名称
+
+        :return: 图片文件名称
+        """
         return "_".join(map(str, self.box)) + ".png"
 
     @staticmethod
     def parse_file(file_name):
-        frame = cv2.imread(file_name)
+        """
+        从文件名和文件内容恢复出frame_box信息
+
+        :param file_name: 文件名
+        :return: tuple元祖,tuple[0]图片信息,hws三维信息,tuple[1]头像位置,长度为4的list
+        """
+        img = cv2.imread(file_name)
         file_path, file_name, file_ext = Util.get_file_path_split(file_name)
         box = file_name.split("_")
-        return frame, box
+        return img, box
 
 
 class LimitList(object):
+    """
+    长度受限制的list
+
+    :cvar int maxsize: list最大长度
+    """
+
     def __init__(self, maxsize=10):
         self.maxsize = maxsize
         self.__list = list()
 
     def append(self, item):
+        """
+        向list新增元素
+
+        :param item: 新增元素
+        :return: 是否添加成功,长度超过最大限度则返回false
+        """
         if len(self.__list) >= self.maxsize:
             return False
         else:
@@ -310,6 +380,11 @@ class LimitList(object):
             return True
 
     def pop(self):
+        """
+        从list里弹出元素
+
+        :return: 返回弹出的元素,如果list为空则返回None
+        """
         if len(self.__list) == 0:
             return None
         return self.__list.pop()
@@ -362,7 +437,7 @@ class Person(object):
             if not os.path.exists(dir_path):
                 os.makedirs(dir_path)
             for frame_box in self.frames_box_limit:
-                cv2.imwrite(dir_path + frame_box.name, frame_box.frame)
+                cv2.imwrite(dir_path + frame_box.name, frame_box.img)
             self.is_new = False
 
     @staticmethod
@@ -373,6 +448,7 @@ class Person(object):
             if os.path.isdir(cameras_dir + camera_dir):
                 camera_person_dict[camera_dir] = Util.get_dirs_files(cameras_dir + "/" + camera_dir + "/")
         return camera_person_dict
+
 
 class Track(object):
     __id = 0
