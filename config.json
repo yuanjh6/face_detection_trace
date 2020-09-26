@@ -2,14 +2,14 @@
   "ipcs": [
     {
       "name": "test1",
-      "path": "video/1.mp4",
+      "path": "../video/1.mp4",
       "realtime": 0,
       "detection_freq": 20,
       "save_stranger": 1
     },
     {
       "name": "test2",
-      "path": "video/2.mp4",
+      "path": "../video/2.mp4",
       "realtime": 0,
       "detection_freq": 20,
       "save_stranger": 0
@@ -17,6 +17,6 @@
   ],
   "face_encoding": "DLIB_REG",
   "face_detection": "CV_CAS",
-  "person_image_dir": "data/person_img/",
-  "video_image_dir": "data/video_imgs/"
+  "person_image_dir": "../data/person_img/",
+  "video_image_dir": "../data/video_imgs/"
 }

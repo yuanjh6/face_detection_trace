@@ -1,4 +1,5 @@
 import abc
+import os
 from typing import List, Tuple
 
 import dlib
@@ -66,8 +67,8 @@ class FaceEncodingFrFe(FaceEncoding):
 
 class FaceEncodingDlibReg(FaceEncoding):
     face_detector = dlib.get_frontal_face_detector()
-    shape = dlib.shape_predictor("../model/shape_predictor_68_face_landmarks.dat")
-    face_encoding = dlib.face_recognition_model_v1("../model/dlib_face_recognition_resnet_model_v1.dat")
+    shape = dlib.shape_predictor( os.path.normpath('%s/%s' % (os.path.dirname(__file__), "../model/shape_predictor_68_face_landmarks.dat")))
+    face_encoding = dlib.face_recognition_model_v1( os.path.normpath('%s/%s' % (os.path.dirname(__file__), "../model/dlib_face_recognition_resnet_model_v1.dat")))
 
     @staticmethod
     def cv_box_to_dlib(box):

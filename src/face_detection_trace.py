@@ -32,7 +32,7 @@ optional arguments:
 """
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-handler = logging.FileHandler("log.txt")
+handler = logging.FileHandler("../log.txt")
 handler.setLevel(logging.INFO)
 logger = logging.getLogger(__name__)
 logger.addHandler(handler)

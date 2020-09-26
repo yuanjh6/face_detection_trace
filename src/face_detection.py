@@ -1,7 +1,7 @@
 import abc
 from typing import List, Tuple
 import cv2
-
+import os
 import dlib
 
 
@@ -71,7 +71,7 @@ class FaceDetectionDlibFro(FaceDetection):
 
 
 class FaceDetectionCvCas(FaceDetection):
-    cascade_xml = "../model/haarcascade_frontalface_default.xml"
+    cascade_xml = os.path.normpath('%s/%s'%(os.path.dirname(__file__),"../model/haarcascade_frontalface_default.xml"))
     face_detector = cv2.CascadeClassifier(cascade_xml)
 
     def detection(self, frame):
